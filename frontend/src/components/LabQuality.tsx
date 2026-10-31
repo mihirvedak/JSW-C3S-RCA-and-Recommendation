@@ -39,18 +39,22 @@ const fmtValue = (v: number) => v.toFixed(Math.abs(v) >= 100 ? 1 : 2)
 function Cell({
   sensor,
   reading,
+  newestEver,
   previous,
   newestLabSample,
   now,
 }: {
   sensor: SensorDef
   reading: LastReading | undefined
+  /** The newest reading the platform holds for this sensor, whatever the window. */
+  newestEver: LastReading | undefined
   previous: Point | undefined
   newestLabSample: number | null
   now: number
 }) {
   const value = reading?.value ?? null
   const time = reading?.time ?? null
+  const lastSeen = value == null ? (newestEver?.time ?? null) : null
   const stale =
     time != null && newestLabSample != null && newestLabSample - time > STALE_FACTOR_MS
 
@@ -89,7 +93,17 @@ function Cell({
 
       <footer className="lab-cell__foot">
         {time == null ? (
-          <span className="lab-cell__time lab-cell__time--none">no sample</span>
+          <span className="lab-cell__time lab-cell__time--none">
+            {lastSeen != null ? (
+              <span title={`No sample in the selected range. Newest reading on the platform: ${formatFull(lastSeen)}`}>
+                no sample in range · last seen {formatAge(lastSeen, now)}
+              </span>
+            ) : newestEver != null ? (
+              <span title="The platform holds no reading for this sensor">never reported</span>
+            ) : (
+              'no sample'
+            )}
+          </span>
         ) : (
           <span className="lab-cell__time" title={`Sampled ${formatFull(time)}`}>
             {formatAge(time, now)}
@@ -103,10 +117,13 @@ function Cell({
 
 export function LabQuality({
   latest,
+  newest,
   rows,
   now,
 }: {
   latest: Map<string, LastReading>
+  /** Newest reading ever, per sensor key, for cells with no sample in the range. */
+  newest: Map<string, LastReading>
   /** The selected range's laboratory rows, for the previous sample of each parameter. */
   rows: readonly TimestampRow[]
   now: number
@@ -151,6 +168,7 @@ export function LabQuality({
             key={s.key}
             sensor={s}
             reading={latest.get(s.key)}
+            newestEver={newest.get(s.key)}
             previous={previous.get(s.key)}
             newestLabSample={newestLabSample}
             now={now}

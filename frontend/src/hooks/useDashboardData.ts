@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PROCESS_THIN_MS } from '../services/deviceDataService'
 import type { LastReading } from '../services/deviceDataService'
-import { fetchDevicesRangeChunked, fetchNewestC3S } from '../services/lineDataService'
+import { fetchDevicesRangeChunked, fetchLatestByKey, fetchNewestC3S } from '../services/lineDataService'
 import { fetchAllRcaFindings } from '../services/rcaService'
 import type { RcaFinding, ShiftSummary } from '../services/rcaService'
 import { extractSeries, latestFromRows, matchSamples, unmatchedPredictions } from '../lib/series'
@@ -88,6 +88,13 @@ export interface DashboardData {
   labError: SectionError | null
   /** Latest value per sensor key *within the selected window*. */
   labLatest: Map<string, LastReading>
+  /**
+   * The newest reading each listed laboratory sensor has *ever* reported (the platform's lastDP),
+   * regardless of the window. Lets a cell with no sample in range say when the feed was last seen,
+   * so a laboratory that stopped reporting reads as "last seen 16 Oct", not as a bare dash.
+   * Empty until the probe answers, or if it fails (never fatal).
+   */
+  labNewest: Map<string, LastReading>
   processLatest: Map<string, LastReading>
   dataError: SectionError | null
 
@@ -173,6 +180,7 @@ export function useDashboardData(selection: TimeSelection, line: LineModel): Das
   const [anchorError, setAnchorError] = useState<SectionError | null>(null)
 
   const [labRows, setLabRows] = useState<TimestampRow[]>([])
+  const [labNewest, setLabNewest] = useState<Map<string, LastReading>>(() => new Map())
   const [labLoading, setLabLoading] = useState(true)
   const [dataError, setDataError] = useState<SectionError | null>(null)
 
@@ -227,6 +235,22 @@ export function useDashboardData(selection: TimeSelection, line: LineModel): Das
         // still renders, and surface the failure.
         setAnchorMs(clampEnd(Date.now()))
         setAnchorError(toSectionError(err))
+      })
+    return () => controller.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `line` is identified by lineKey
+  }, [nonce, lineKey])
+
+  // 1b. Newest-ever reading per laboratory sensor (one lastDP per lab device). Informational only:
+  //     a failure leaves the map empty and nothing else notices.
+  useEffect(() => {
+    const controller = new AbortController()
+    setLabNewest(new Map())
+    fetchLatestByKey(line, line.labSensors.map((s) => s.key), controller.signal)
+      .then((m) => {
+        if (!controller.signal.aborted) setLabNewest(m)
+      })
+      .catch(() => {
+        // Not shown: the windowed readings stand on their own.
       })
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `line` is identified by lineKey
@@ -359,6 +383,7 @@ export function useDashboardData(selection: TimeSelection, line: LineModel): Das
     processFull: windowStart != null && windowEnd != null && windowEnd - windowStart <= PROCESS_THIN_ABOVE_MS,
     labError: dataError,
     labLatest,
+    labNewest,
     processLatest,
     dataError: dataError ?? anchorError,
     predicted,

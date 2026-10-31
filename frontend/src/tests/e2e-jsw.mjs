@@ -37,13 +37,16 @@ function rows(start, end, step, fn) {
 }
 
 const wave = (t, base, amp, periodH) => base + amp * Math.sin((t / HOUR / periodH) * 2 * Math.PI)
+/** The kiln feed laboratory's last sample: 15 days before the newest C3S. */
+const KILN_FEED_STOP = END - 15 * 24 * HOUR
 
 /** Every device of the JSW line, by id, as a function of the window asked for. */
 const DEVICES = {
   // Clinker XRD/XRF: a sample about every 2 h. D18 lab C3S, D24 free lime, D19 SO3.
   FLSCLINKER: (s, e) => rows(s, e, 2 * HOUR, (t) => ({ D18: +wave(t, 61, 2, 36).toFixed(2), D24: +wave(t, 1.4, 0.5, 20).toFixed(2), D19: 0.9, D6: 21.8, D8: 5.4, D11: 3.9, D15: 65.1, D5: 93.5, D13: 2.25, D10: 1.4, D16: 18.2, D14: 7.6, D21: 11.9 })),
-  // Kiln feed XRF: every 2 h, offset. D7 SiO2 (a D7 that is NOT the predicted C3S). D6 LSF, D11 SM, D10 AM.
-  FLSKILNFEED: (s, e) => rows(s, e - 17 * MIN, 2 * HOUR, (t) => ({ D14: 43.1, D7: 13.6, D8: 3.2, D13: 2.1, D15: 1.9, D16: 0.3, D17: 0.2, D18: 0.6, D6: +wave(t, 100, 1.5, 30).toFixed(1), D11: 2.31, D10: 1.29 })),
+  // Kiln feed XRF: every 2 h, offset, and — as reported for Nandyal — nothing after 15 days before the
+  // newest C3S. D7 SiO2 (a D7 that is NOT the predicted C3S). D6 LSF, D11 SM, D10 AM.
+  FLSKILNFEED: (s, e) => rows(s, Math.min(e, KILN_FEED_STOP) - 17 * MIN, 2 * HOUR, (t) => ({ D14: 43.1, D7: 13.6, D8: 3.2, D13: 2.1, D15: 1.9, D16: 0.3, D17: 0.2, D18: 0.6, D6: +wave(t, 100, 1.5, 30).toFixed(1), D11: 2.31, D10: 1.29 })),
   // Raw mill and ball mill XRF: the same layout as the kiln feed, every 2 h.
   FLSRAWMILL01: (s, e) => rows(s, e - 40 * MIN, 2 * HOUR, (t) => ({ D7: 13.4, D8: 3.5, D13: 3.0, D14: 43.0, D6: +wave(t, 100.5, 2, 24).toFixed(1), D11: 1.9, D10: 1.0 })),
   FLSBALLMILL: (s, e) => rows(s, e - 50 * MIN, 4 * HOUR, () => ({ D7: 13.5, D8: 3.4, D13: 3.1, D14: 42.9, D6: 99.8, D11: 1.95, D10: 1.02 })),
@@ -132,8 +135,8 @@ async function apiHandler(route) {
     requested.push({ kind: 'lastDP', devID, sensors })
     const dev = DEVICES[devID]
     if (!dev) return json({ devID, data: Object.fromEntries(sensors.map((s) => [s, []])) })
-    const newest = dev(END - HOUR, END)[0]
-    return json({ devID, data: Object.fromEntries(sensors.map((s) => [s, newest[s] == null ? [] : { time: newest.time, value: newest[s] }])) })
+    const newest = dev(END - 30 * 24 * HOUR, END)[0]
+    return json({ devID, data: Object.fromEntries(sensors.map((s) => [s, newest?.[s] == null ? [] : { time: newest.time, value: newest[s] }])) })
   }
   const m = /\/deviceData\/getDataByStEt\/([^/]+)\/(\d+)\/(\d+)/.exec(path)
   if (m) {
@@ -250,10 +253,16 @@ await step('lab quality groups the six laboratory devices by material, keeps the
   if (!clinker.some(([k, n]) => k === 'FLSCLINKER:D5' && n === 'Clinker LSF')) throw new Error('clinker LSF (D5) missing')
   // A parameter the quality table lists but the feed does not carry yet shows "no sample", not nothing.
   const litre = await page.locator('.lab-cell[title="FLSCLINKER:D26"]').innerText()
-  if (!litre.includes('no sample')) throw new Error(`litre weight (not being filled) should read "no sample": ${litre}`)
+  if (!litre.includes('never reported')) throw new Error(`litre weight (never filled) should read "never reported": ${litre.replace(/\s+/g, ' ')}`)
   await page.getByRole('tab', { name: /Kiln Feed Quality/ }).click()
   const kf = await page.locator('.lab-cell').evaluateAll((els) => els.map((e) => [e.getAttribute('title'), e.querySelector('.lab-cell__name')?.textContent?.trim()]))
   if (!kf.some(([k, n]) => k === 'FLSKILNFEED:D6' && n === 'Kiln feed LSF')) throw new Error(`kiln feed cells: ${JSON.stringify(kf)}`)
+  // The kiln feed laboratory stopped 15 days ago: no sample in the 7-day range, and the cell says when it was last seen.
+  const lsfCell = await page.locator('.lab-cell[title="FLSKILNFEED:D6"]').innerText()
+  if (!/no sample in range · last seen \d+ d ago/.test(lsfCell)) throw new Error(`a stopped feed should say when it was last seen: ${lsfCell.replace(/\s+/g, ' ')}`)
+  // A manual entry that was never filled says so, distinctly.
+  const residue = await page.locator('.lab-cell[title="FLSKILNFEED:D19"]').innerText()
+  if (!residue.includes('never reported')) throw new Error(`a tag with no reading on the platform should say "never reported": ${residue.replace(/\s+/g, ' ')}`)
   await page.getByRole('tab', { name: /Raw Mill/ }).click()
   const rm = await page.locator('.lab-cell').evaluateAll((els) => els.map((e) => [e.getAttribute('title'), e.querySelector('.lab-cell__name')?.textContent?.trim()]))
   if (!rm.some(([k, n]) => k === 'FLSRAWMILL01:D6' && n === 'Raw mill LSF')) throw new Error(`raw mill cells: ${JSON.stringify(rm)}`)

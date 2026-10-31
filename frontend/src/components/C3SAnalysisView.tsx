@@ -280,10 +280,16 @@ export function C3SAnalysisView({
           <Panel title="Laboratory Quality Parameters">
             {d.labLoading ? (
               <LoadingState message="Loading laboratory readings…" />
-            ) : d.labRows.length === 0 ? (
-              <EmptyState message="No laboratory readings in the selected range." />
             ) : (
-              <LabQuality latest={d.labLatest} rows={d.labRows} now={now} />
+              <>
+                {d.labRows.length === 0 ? (
+                  <p className="notice notice--warn" role="status">
+                    <strong>No laboratory readings in the selected range.</strong> Each parameter below says when the
+                    platform last saw it.
+                  </p>
+                ) : null}
+                <LabQuality latest={d.labLatest} newest={d.labNewest} rows={d.labRows} now={now} />
+              </>
             )}
           </Panel>
         </div>
