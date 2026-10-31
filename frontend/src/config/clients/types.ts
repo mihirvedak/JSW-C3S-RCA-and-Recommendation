@@ -191,6 +191,19 @@ export interface LineSpec {
   hidden?: readonly SensorRef[]
   /** Tags never charted on Trend Analysis even when an RCA names them. */
   trendExcluded?: readonly SensorRef[]
+  /**
+   * Process tags Trend Analysis always charts, in this order. Absent: the kiln-operation roles
+   * the line has mapped (burning zone, secondary air, filling degree, tertiary air, inlet O2,
+   * PC coal, kiln coal, kiln speed, cooler flow). The two computed trends (filling degree,
+   * cooler flow) are appended whenever their inputs exist.
+   */
+  processTrends?: readonly SensorRef[]
+  /**
+   * Laboratory parameters Trend Analysis charts over the selected range, in this order. Absent:
+   * the lab roles the line has mapped (lab and predicted C3S, free lime, kiln feed LSF / SM / AM,
+   * clinker SO3, coal and AFR ash).
+   */
+  labTrends?: readonly SensorRef[]
   kilnFilling?: KilnFillingSpec
   specLimits?: readonly SpecLimitSpec[]
   binLimits?: BinLimitsSpec

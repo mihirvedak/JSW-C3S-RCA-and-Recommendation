@@ -1,8 +1,12 @@
 /**
- * The kiln-operation trends every RCA event is read against, in the order operators asked for
- * them: burning zone, secondary air, kiln filling degree, tertiary air, kiln inlet O2, the two
- * coal rates, kiln speed and cooler air. Each is a role; a line that has not mapped the role does
- * not get the card, and says nothing in its place.
+ * The process trends every RCA event is read against. By default the kiln-operation set, in the
+ * order operators asked for: burning zone, secondary air, kiln filling degree, tertiary air, kiln
+ * inlet O2, the two coal rates, kiln speed and cooler air. Each is a role; a line that has not
+ * mapped the role does not get the card. A line may instead list the process tags it wants charted
+ * (`LineSpec.processTrends`); the computed trends are appended when their inputs exist.
+ *
+ * `labTrends` is the laboratory counterpart: the quality parameters charted over the selected
+ * range (`LineSpec.labTrends`, else the mapped lab roles).
  *
  * Two trends have no tag and are computed from the tags they are made of, and say so on screen:
  *   - kiln filling degree (%): the plant's formula, anchor % × (feed / anchor feed) × (anchor rpm / rpm),
@@ -151,23 +155,42 @@ const ORDER: ReadonlyArray<Role | 'fill' | 'cooler'> = [
 
 const cache = new WeakMap<LineModel, TrendDef[]>()
 
-/** The kiln-operation trends this line can show, in operators' order. */
+/** The process trends this line always shows, in order. */
 export function kilnOperationTrends(line: LineModel): TrendDef[] {
   const hit = cache.get(line)
   if (hit) return hit
   const out: TrendDef[] = []
-  for (const item of ORDER) {
-    if (item === 'fill') {
-      const t = fillTrend(line)
-      if (t) out.push(t)
-    } else if (item === 'cooler') {
-      const t = coolerFlowTrend(line)
-      if (t) out.push(t)
-    } else {
-      const key = line.role(item)
-      if (key) out.push(tagTrend(line, key))
+  if (line.spec.processTrends) {
+    for (const key of line.processTrendKeys) out.push(tagTrend(line, key))
+    const fill = fillTrend(line)
+    if (fill) out.push(fill)
+    const cooler = coolerFlowTrend(line)
+    if (cooler) out.push(cooler)
+  } else {
+    for (const item of ORDER) {
+      if (item === 'fill') {
+        const t = fillTrend(line)
+        if (t) out.push(t)
+      } else if (item === 'cooler') {
+        const t = coolerFlowTrend(line)
+        if (t) out.push(t)
+      } else {
+        const key = line.role(item)
+        if (key) out.push(tagTrend(line, key))
+      }
     }
   }
   cache.set(line, out)
+  return out
+}
+
+const labCache = new WeakMap<LineModel, TrendDef[]>()
+
+/** The laboratory parameters this line charts over the selected range, in order. */
+export function labTrends(line: LineModel): TrendDef[] {
+  const hit = labCache.get(line)
+  if (hit) return hit
+  const out = line.labTrendKeys.filter((k) => !line.isHidden(k)).map((k) => tagTrend(line, k))
+  labCache.set(line, out)
   return out
 }

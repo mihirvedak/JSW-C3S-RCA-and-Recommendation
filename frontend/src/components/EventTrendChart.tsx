@@ -49,6 +49,7 @@ export function EventTrendChart({
   maxGapMs,
   band,
   flagAt,
+  markers = false,
 }: {
   name: string
   unit: string | null
@@ -64,6 +65,8 @@ export function EventTrendChart({
   band?: { lo: number; hi: number; label: string }
   /** A flag level drawn as a dashed line, e.g. 18 %. */
   flagAt?: number
+  /** Draw each sample as a point (laboratory series: a sample every hour or day, never a minute). */
+  markers?: boolean
 }) {
   const options = useMemo<Highcharts.Options>(() => {
     const fmt = (v: number) => v.toFixed(Math.abs(v) >= 100 ? 1 : 2)
@@ -177,8 +180,10 @@ export function EventTrendChart({
           type: 'line',
           name,
           color: COLOR.line,
-          lineWidth: short ? 1.75 : 1.25,
-          marker: { enabled: false, symbol: 'circle', states: { hover: { enabled: true, radius: 3 } } },
+          lineWidth: markers ? 1 : short ? 1.75 : 1.25,
+          marker: markers
+            ? { enabled: true, symbol: 'circle', radius: 3, lineColor: '#fff', lineWidth: 1 }
+            : { enabled: false, symbol: 'circle', states: { hover: { enabled: true, radius: 3 } } },
           data: breakAtGaps(points, maxGapMs),
           zIndex: 2,
         },
@@ -197,7 +202,7 @@ export function EventTrendChart({
           : []),
       ],
     }
-  }, [name, unit, points, eventMs, atEvent, windowStart, windowEnd, maxGapMs, band, flagAt])
+  }, [name, unit, points, eventMs, atEvent, windowStart, windowEnd, maxGapMs, band, flagAt, markers])
 
   // Highcharts merges an update into the chart, so switching between the quarter-hour axis and the
   // day axis would keep the other's tick settings and labels; a fresh chart for each avoids that.

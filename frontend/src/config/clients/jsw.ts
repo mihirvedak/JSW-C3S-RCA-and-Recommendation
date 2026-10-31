@@ -387,6 +387,37 @@ const KILN_LINE: LineSpec = {
   },
   /** The dashboard shows one predicted C3S (D7); the superseded physics C3S (D5) stays in the registry. */
   hidden: [c3s('D5')],
+  /** Every process tag supplied so far, charted on Trend Analysis in this order. */
+  processTrends: [
+    preheater('D63'),
+    kiln('D154'),
+    kiln('D155'),
+    kiln('D156'),
+    afr('D2'),
+    { devID: JSWCALN, sensorId: 'D0' },
+    { devID: JSWCALN, sensorId: 'D1' },
+  ],
+  /** The quality parameters charted on Trend Analysis, in this order. */
+  labTrends: [
+    clinker('D18'),
+    c3s('D7'),
+    clinker('D24'),
+    clinker('D19'),
+    clinker('D5'),
+    clinker('D13'),
+    clinker('D10'),
+    kilnFeed('D6'),
+    kilnFeed('D11'),
+    kilnFeed('D10'),
+    kilnFeed('D14'),
+    kilnFeed('D7'),
+    rawMill('D6'),
+    { devID: FLSCALC, sensorId: 'D16' },
+    { devID: FLSCALC, sensorId: 'D15' },
+    { devID: FLSCALC, sensorId: 'D17' },
+    coal('D12'),
+    coal('D17'),
+  ],
   /*
    * Adani's cap of 50 % (its model occasionally emits impossible values) would drop Nandyal's
    * Bogue + Ridge C3S if it runs high. 80 % is a physical ceiling for Bogue C3S; the plant's

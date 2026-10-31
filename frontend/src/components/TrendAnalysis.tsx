@@ -13,7 +13,11 @@
  *   - predicted and actual C3S against free lime over the clinker zones, for the days up to the
  *     event, with the event on the predicted plot (events are triggered on predicted C3S),
  *   - the last four laboratory samples at or before the event, for the lab tags the RCA names.
- * "Event window" narrows the charts to 1 h before to 30 min after the event.
+ * "Event window" narrows the process charts to 1 h before to 30 min after the event.
+ *
+ * Laboratory trends (`labTrends` in `config/kilnTrends.ts`: the line's quality parameters) are
+ * charted over the selected range in both modes, each sample as a point, since a laboratory
+ * reports every hour or day and an hour-and-a-half window would hold at most one sample.
  *
  * The charts cover the process data actually loaded: at most the newest 7 days of a longer range.
  * An event further back than that is charted over its own 7 days of the range instead
@@ -29,9 +33,9 @@ import { relevantParameters } from '../config/rcaParameters'
 import type { RelevantParameter } from '../config/rcaParameters'
 import { useLine } from '../config/LineContext'
 import type { LineModel } from '../config/lineModel'
-import { FILL_KEY, fillingStats, kilnOperationTrends, rpmForFilling, tagTrend } from '../config/kilnTrends'
+import { FILL_KEY, fillingStats, kilnOperationTrends, labTrends, rpmForFilling, tagTrend } from '../config/kilnTrends'
 import type { TrendDef } from '../config/kilnTrends'
-import { extractSeries } from '../lib/series'
+import { extractSeries, medianIntervalMs } from '../lib/series'
 import type { Point, TimestampRow } from '../lib/series'
 import { LAB_LOOKBACK_MS, SAMPLE_COUNT, lastSamples, spliceRows, trendWindow, valueAt } from '../lib/eventTrends'
 import type { EventWindow } from '../lib/eventTrends'
@@ -338,6 +342,97 @@ function FillingFigures({
   )
 }
 
+/** Join two laboratory samples only when the gap is no more than this multiple of the series' median interval. */
+const LAB_GAP_FACTOR = 2.5
+
+function LabTrendCard({
+  def,
+  points,
+  eventMs,
+  window: w,
+  scope,
+}: {
+  def: TrendDef
+  points: readonly Point[]
+  eventMs: number | null
+  window: EventWindow
+  scope: string
+}) {
+  const median = medianIntervalMs(points)
+  // The sample in force at the event: the newest one at or before it, however old (lab cadence).
+  const at = eventMs != null ? (points.filter((p) => p.t <= eventMs).slice(-1)[0] ?? null) : (points[points.length - 1] ?? null)
+  return (
+    <article className="ltrend__card" data-trend={def.key}>
+      <header className="ltrend__card-head">
+        <div>
+          <h4 title={def.tags.join(', ')}>{def.label}</h4>
+        </div>
+        <div className="etrend__at">
+          <span className="etrend__at-label">{eventMs != null ? 'Last sample before event' : 'Latest'}</span>
+          {at ? (
+            <>
+              <strong>
+                {fmt(at.v)}
+                {def.unit ? <span className="etrend__unit"> {def.unit}</span> : null}
+              </strong>
+              <span className="etrend__time" title={formatFull(at.t)}>
+                {formatDateTime(at.t)}
+              </span>
+            </>
+          ) : (
+            <NoData reason={`No sample in ${scope}`} />
+          )}
+        </div>
+      </header>
+      {points.length === 0 ? (
+        <p className="trend__empty">No samples for this parameter in {scope}.</p>
+      ) : (
+        <EventTrendChart
+          name={def.label}
+          unit={def.unit}
+          points={points}
+          eventMs={eventMs}
+          atEvent={eventMs != null ? at : null}
+          windowStart={w.start}
+          windowEnd={w.end}
+          maxGapMs={median == null ? Number.POSITIVE_INFINITY : median * LAB_GAP_FACTOR}
+          markers
+        />
+      )}
+    </article>
+  )
+}
+
+function LabTrends({
+  rows,
+  eventMs,
+  window: w,
+  scope,
+}: {
+  rows: readonly TimestampRow[]
+  eventMs: number | null
+  window: EventWindow
+  scope: string
+}) {
+  const line = useLine()
+  const defs = useMemo(() => labTrends(line), [line])
+  const series = useMemo(() => {
+    const out = new Map<string, Point[]>()
+    for (const d of defs) out.set(d.key, d.series(rows).filter((p) => p.t >= w.start && p.t <= w.end))
+    return out
+  }, [defs, rows, w.start, w.end])
+  if (defs.length === 0) {
+    return <EmptyState message={`No laboratory parameters are configured for trends on ${line.plant.name}.`} />
+  }
+  return (
+    <div className="ltrend__grid">
+      {defs.map((d) => (
+        <LabTrendCard key={d.key} def={d} points={series.get(d.key) ?? []} eventMs={eventMs} window={w} scope={scope} />
+      ))}
+    </div>
+  )
+}
+
 function ProcessTrends({
   params,
   rows,
@@ -445,6 +540,34 @@ export function TrendAnalysis({
   const processError = ownWindowOnly ? trends.processError : ownContext ? context.error : range.error
   // Thinned rows are one reading per 5 minutes; only a longer silence is a gap.
   const maxGapMs = (range.thinned || ownContext) && !showEventWindow ? 15 * MINUTE_MS : 5 * MINUTE_MS
+
+  // Laboratory samples are sparse, so their charts always cover the range (or, for an event outside
+  // it, the 96-hour look-back the event's own laboratory load covers), never the event window.
+  const labW: EventWindow = ownWindowOnly && eventMs != null ? { start: eventMs - LAB_LOOKBACK_MS, end: eventMs } : loaded
+  const labRows = ownWindowOnly ? trends.labRows : rangeLab.rows
+  const labLoading = ownWindowOnly ? trends.labLoading : rangeLab.loading
+  const labError = ownWindowOnly ? trends.labError : rangeLab.error
+  const labPanel = (
+    <Panel title="Laboratory Trends">
+      {labLoading ? (
+        <LoadingState message="Loading laboratory trends…" />
+      ) : labError ? (
+        <ErrorState message="Laboratory data unavailable" detail={labError.message} onRetry={ownWindowOnly ? trends.reload : rangeLab.reload} />
+      ) : (
+        <LabTrends
+          rows={labRows}
+          eventMs={eventMs}
+          window={labW}
+          scope={ownWindowOnly ? `the ${LAB_LOOKBACK_MS / HOUR_MS} h up to the event` : 'the selected range'}
+        />
+      )}
+      <p className="muted small ltrend__foot">
+        The line&rsquo;s quality parameters over {ownWindowOnly ? `the ${LAB_LOOKBACK_MS / HOUR_MS} h up to the event` : 'the selected range'}, each
+        laboratory sample as a point and the line broken across gaps longer than the parameter&rsquo;s usual interval.
+        {eventMs != null ? ' The red line is the event; the ringed point is the last sample before it.' : ''} Drag across a chart to zoom in.
+      </p>
+    </Panel>
+  )
 
   const processPanel = (
     <Panel
@@ -621,6 +744,7 @@ export function TrendAnalysis({
               />
             )}
           </Panel>
+          {labPanel}
           {processPanel}
         </>
       ) : eventMs == null || params == null ? (
@@ -655,6 +779,7 @@ export function TrendAnalysis({
             </p>
           </Panel>
 
+          {labPanel}
           {processPanel}
         </>
       )}

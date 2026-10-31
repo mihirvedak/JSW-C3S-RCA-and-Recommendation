@@ -764,13 +764,9 @@ code {
 .etrend__table thead th:first-child { background: var(--c-surface-2); }
 .etrend__param { font-weight: 620; color: var(--c-ink); }
 .etrend__table td strong { display: block; font-size: 13px; font-weight: 650; }
-.etrend__time { display: block; font-size: 10.5px; color: var(--c-ink-3); white-space: nowrap; }
-
-.etrend__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-2); }
-@media (max-width: 1280px) {
-  .etrend__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-.etrend__card {
+.etrend__time { display: block; font-size: 10.5px; color: var(--c-ink-3); white-space: nowrap; }.etrend__grid, .ltrend__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-2); }
+@media (max-width: 1280px) {.etrend__grid, .ltrend__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}.etrend__card, .ltrend__card {
   border: 1px solid var(--c-border);
   border-radius: var(--radius-sm);
   padding: var(--sp-3);
@@ -778,11 +774,8 @@ code {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-}
-/* Charts sit on a common baseline however many sources a card lists. */
-.etrend__chart, .etrend__card > .trend__empty { margin-top: auto; }
-.etrend__card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-3); }
-.etrend__card-head h4 { margin: 0; font-size: 13px; font-weight: 650; }
+}/* Charts sit on a common baseline however many sources a card lists. */
+.etrend__chart, .etrend__card > .trend__empty, .ltrend__card > .trend__empty { margin-top: auto; }.etrend__card-head, .ltrend__card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-3); }.etrend__card-head h4, .ltrend__card-head h4 { margin: 0; font-size: 13px; font-weight: 650; }
 .etrend__at { text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .etrend__at-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--c-ink-3); }
 .etrend__at strong { font-size: 16px; font-weight: 650; }
@@ -791,8 +784,7 @@ code {
 .etrend__figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px var(--sp-2); margin: 0; }
 .etrend__figs dt { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--c-ink-3); }
 .etrend__figs dd { margin: 1px 0 0; font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.etrend__figs dd.is-flag { color: #8d1f30; }
-.etrend__card-head .badge { margin-top: 3px; }
+.etrend__figs dd.is-flag { color: #8d1f30; }.etrend__card-head .badge, .ltrend__card-head .badge { margin-top: 3px; }
 .etrend__note { margin: 0; font-size: 11px; line-height: 1.45; color: var(--c-ink-3); }
 
 /* ---------------------------- Clinker zones ---------------------------- */
@@ -815,11 +807,9 @@ code {
 }
 .czone__counts li { display: inline-flex; align-items: center; gap: 5px; }
 .czone__counts strong { font-variant-numeric: tabular-nums; color: var(--c-ink); }
-.czone__swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(15, 27, 45, 0.15); }
-.etrend__card > .trend__empty { padding-bottom: 0; }
+.czone__swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(15, 27, 45, 0.15); }.etrend__card > .trend__empty, .ltrend__card > .trend__empty { padding-bottom: 0; }
 
-@media (max-width: 760px) {
-  .etrend__grid { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 760px) {.etrend__grid, .ltrend__grid { grid-template-columns: minmax(0, 1fr); }
   /* Its own row: the responsive `.field { flex: 1 }` further down would share it with the summary. */
   .etrend__bar .etrend__picker { flex: 1 1 100%; }
   .etrend__picker .field__input { width: 100%; min-width: 0; }

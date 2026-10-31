@@ -11,7 +11,7 @@ import type { TimestampRow } from '../lib/series'
 import { HOUR_MS, MINUTE_MS } from '../lib/time'
 import { fetchRcaFindings } from '../services/rcaService'
 import type { ClinkerTargets } from '../services/rcaService'
-import { fillingStats, kilnFilling, kilnOperationTrends, rpmForFilling } from '../config/kilnTrends'
+import { fillingStats, kilnFilling, kilnOperationTrends, labTrends, rpmForFilling } from '../config/kilnTrends'
 import { ADANI, JSW, raw } from './lines'
 
 /** As INS_df1b3c1a11de returns them (result 6adee6b96ef9b41b70f92fa7). */
@@ -225,10 +225,32 @@ describe('kiln-operation trends', () => {
     expect(flow.series([{ t: 1, values: all }, { t: 2, values: missingOne }])).toEqual([{ t: 1, v: 120 }])
   })
 
-  it('shows a line only the trends it has tags for: JSW has the two coal rates and nothing else yet', () => {
+  it('charts the process tags a line lists, else its kiln-operation roles: JSW lists its seven DCS tags', () => {
     expect(kilnOperationTrends(JSW).map((d) => [d.label, d.tags[0]])).toEqual([
-      ['PC coal', 'ABBKLN_A1:D155'],
+      ['Kiln feed', 'ABBBHPH_A1:D63'],
       ['Kiln coal', 'ABBKLN_A1:D154'],
+      ['PC coal', 'ABBKLN_A1:D155'],
+      ['Low-NOx coal', 'ABBKLN_A1:D156'],
+      ['Solid AFR', 'ABBKLNAFRSGC_A1:D2'],
+      ['Calciner 1 temperature', 'JSWCALN_A1:D0'],
+      ['Calciner 2 temperature', 'JSWCALN_A1:D1'],
+    ])
+  })
+
+  it('charts laboratory parameters: the line\'s list, else the mapped lab roles', () => {
+    expect(labTrends(JSW).map((d) => d.key).slice(0, 4)).toEqual(['FLSCLINKER:D18', 'JSW_C3S:D7', 'FLSCLINKER:D24', 'FLSCLINKER:D19'])
+    expect(labTrends(JSW)).toHaveLength(18)
+    // Adani lists none, so its mapped lab roles are charted, hidden tags never.
+    expect(labTrends(ADANI).map((d) => d.key)).toEqual([
+      raw('D58').replace('ADANI_RAW', 'ADANI_LAB'),
+      'ADANI_LAB:D55',
+      'ADANI_LAB:D43',
+      'ADANI_LAB:D23',
+      'ADANI_LAB:D24',
+      'ADANI_LAB:D25',
+      'ADANI_LAB:D38',
+      'ADANI_LAB:D47',
+      'ADANI_LAB:D48',
     ])
   })
 })

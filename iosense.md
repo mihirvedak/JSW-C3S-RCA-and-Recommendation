@@ -137,7 +137,8 @@ free lime < 1.5, SO3 < 1.00, LSF 92–95, SM 2.2–2.3, AM 1.3–1.5, C2S 20–2
 | C3S trend, histogram, 48-h timeline, zone plots, RCA panel, recommendations, shift reports | On (predicted `JSW_C3S:D7`, lab `FLSCLINKER:D18`, free lime `FLSCLINKER:D24`) |
 | Compliance, lab rows | 25 rows from the quality-table targets (above); no row falls back to the insight bands |
 | Compliance, process rows | **Off** — no kiln-feed bin limit table; the table says so |
-| Kiln-operation trends | Only PC coal and kiln coal; **no BZT, SAT, TAD, kiln inlet O2, kiln speed, cooler flow, filling degree** (no tags) |
+| Trend Analysis, process | All seven DCS tags supplied (`processTrends` in `jsw.ts`): kiln feed, kiln / PC / low-NOx coal, solid AFR, calciner 1 / 2 temperature; **no BZT, SAT, TAD, kiln inlet O2, kiln speed, cooler flow, filling degree** (no tags) |
+| Trend Analysis, laboratory | 18 quality parameters over the selected range (`labTrends`): lab and predicted C3S, free lime, clinker SO3 / LSF / SM / AM, kiln feed LSF / SM / AM / CaO / SiO2, raw mill LSF, average calcination / calciner SO3 / temperature, kiln and PC coal ash; each sample a point, the RCA event marked with the last sample before it |
 | RCA-named parameters | Fuel rates, kiln feed, fuel ash, NCV, free lime, raw-meal oxides, kiln feed LSF, raw-mix moduli resolve; **air-side / kiln-speed mentions resolve to nothing** (no tags) |
 | Data cut-off | None (loads to the newest sample) |
 | SHC Optimizer link | "Not configured for JSW Cement" until `shcOptimizerUrl` is set |
@@ -335,7 +336,14 @@ A third tab with two modes (2026-10-28):
 | Process trends | Selected range from the dashboard load, plus `ADANI_RAW` via #3 over event −1 h → +30 min at full minute resolution. Event drawn as a line at the event time; value "at event" is the newest reading in the 5 min up to it. The kiln-operation set (below), then other tags the RCA names |
 | Last 4 laboratory samples | `ADANI_LAB` via #3 over the 96 h before the event; per parameter, the four newest samples at or before the event time |
 
-**Kiln-operation set** (`frontend/src/config/kilnTrends.ts`), shown in both modes in this order:
+**Per line (2026-10-31).** A line may list the process tags it wants charted (`LineSpec.processTrends`;
+JSW lists its seven DCS tags) and the laboratory parameters (`LineSpec.labTrends`); without a list
+the mapped kiln-operation roles and lab roles are used (Adani). A **Laboratory Trends** panel charts
+the quality parameters over the selected range in both modes (never the 1.5 h event window: a
+laboratory reports every hour or day), each sample a point, the line broken across gaps longer than
+2.5× the parameter's median interval; with an event open, the last sample before it is ringed.
+
+**Kiln-operation set** (`frontend/src/config/kilnTrends.ts`), Adani's default, shown in both modes in this order:
 BZT `D0`, Secondary Air Temp `D117`, kiln filling degree (computed), TAD Temperature `D122`, Kiln
 Inlet O2 `D71`, PC Coal `D75`, Kiln Coal `D66`, Kiln RPM `D73`, cooler fan flow (computed), then the
 RCA-named tags, in one 4-column grid. PC Outlet Temp `D77` is not charted (plant request, 2026-10-28). The tag map grades `D77` "flag", `D71` "unreliable" and `D73` "drop"; the cards

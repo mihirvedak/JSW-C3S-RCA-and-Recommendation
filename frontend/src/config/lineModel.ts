@@ -306,6 +306,20 @@ export class LineModel {
     return this.excluded.has(key)
   }
 
+  /** Process tags Trend Analysis always charts: the spec's list, else the mapped kiln-operation roles. */
+  get processTrendKeys(): string[] {
+    const listed = this.spec.processTrends?.map(refKey)
+    if (listed) return listed.filter((k) => this.registry.has(k))
+    return this.roleKeys(['burningZoneTemp', 'secondaryAirTemp', 'tertiaryAirTemp', 'kilnInletO2', 'pcCoal', 'kilnCoal', 'kilnRpm'])
+  }
+
+  /** Laboratory parameters Trend Analysis charts: the spec's list, else the mapped lab roles. */
+  get labTrendKeys(): string[] {
+    const listed = this.spec.labTrends?.map(refKey)
+    if (listed) return listed.filter((k) => this.registry.has(k))
+    return this.roleKeys(['actualC3S', 'predictedC3S', 'freeLime', 'kilnFeedLsf', 'kilnFeedSm', 'kilnFeedAm', 'clinkerSO3', 'coalAsh', 'afrAsh'])
+  }
+
   /* ------------------------------ plausibility ------------------------------ */
 
   /** True when a reading is outside what the sensor can report, and must not be shown. */
