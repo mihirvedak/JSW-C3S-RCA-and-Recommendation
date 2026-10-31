@@ -444,8 +444,8 @@ describe('rows of several devices', () => {
     const spy = mockFetch({ success: true, data: [] })
     await fetchDevicesRange(JSW, JSW.labDevices, 1, 2)
     const urls = spy.mock.calls.map((c) => String(c[0]))
-    expect(urls).toHaveLength(6)
-    for (const d of ['FLSCLINKER', 'FLSKILNFEED', 'JSWCOAL_A1', 'JSWBMBCLRMTR_KC', 'JSWBMBCLRMTR_PC', 'JSW_C3S']) {
+    expect(urls).toHaveLength(JSW.labDevices.length)
+    for (const d of JSW.labDevices) {
       expect(urls.some((u) => u.includes(`/getDataByStEt/${d}/`))).toBe(true)
     }
   })

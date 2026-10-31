@@ -117,9 +117,19 @@ describe('relevantParameters', () => {
 
   it('resolves the same wording to another line\'s tags, skipping the roles it has not mapped', () => {
     const p = relevantParameters(overlimed, JSW)
-    // JSW has no LSF or raw-mix tags, so those mentions bring nothing in; the fuel tags resolve.
+    // JSW has no burning-zone tag, so "Overlimed" brings in free lime and LSF only; the fuel tags resolve.
     expect(p.process.map((x) => x.key)).toEqual(['ABBKLNAFRSGC_A1:D2', 'ABBKLN_A1:D154', 'ABBKLN_A1:D155', 'ABBKLN_A1:D156', 'ABBBHPH_A1:D63'])
-    expect(p.lab.map((x) => x.key)).toEqual(['JSW_C3S:D7', 'FLSCLINKER:D18', 'FLSCLINKER:D24', 'JSWCOAL_A1:D12', 'JSWCOAL_A1:D17'])
+    expect(p.lab.map((x) => x.key)).toEqual([
+      'JSW_C3S:D7',
+      'FLSCLINKER:D18',
+      'FLSCLINKER:D24',
+      'FLSKILNFEED:D6',
+      'JSWCOAL_A1:D12',
+      'JSWCOAL_A1:D17',
+      'FLSRAWMILL01:D6',
+      'FLSRAWMILL01:D11',
+      'FLSRAWMILL01:D10',
+    ])
     // The reason each tag is shown travels with it.
     expect(p.process.find((x) => x.key === 'ABBKLN_A1:D156')?.sources).toEqual([
       'Root cause: TSR low',

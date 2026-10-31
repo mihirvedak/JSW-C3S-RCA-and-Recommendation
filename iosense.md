@@ -97,39 +97,59 @@ line (`predictedC3SMax`, JSW 80 %).
 
 | Resource | ID | Read as | Role(s) |
 |---|---|---|---|
-| Clinker XRD/XRF | `FLSCLINKER` D18 lab C3S, D24 free lime, D19 SO3 | lab | `actualC3S`, `freeLime`, `clinkerSO3` |
-| Kiln feed XRF | `FLSKILNFEED` D14 CaO, D7 SiO2, D8 Al2O3, D13 Fe2O3, D214 LOI | lab | `rawMeal*` (Bogue K0, dry-basis factor) |
+| Raw mill XRF | `FLSRAWMILL01` D7 SiO2, D8 Al2O3, D13 Fe2O3, D14 CaO, D15 MgO, D16 SO3, D17 Na2O, D18 K2O, D213 Cl, D6 LSF, D11 SM, D10 AM, D214 LOI; manual D216–D219 mix proportions, D19 / D20 residues | lab | `rawMixLsf` / `rawMixSm` / `rawMixAm` |
+| Ball mill XRF | `FLSBALLMILL` same layout as the raw mill (D161 "Remarks" is text, not listed) | lab | — |
+| Kiln feed XRF | `FLSKILNFEED` same layout: D7 SiO2, D8 Al2O3, D13 Fe2O3, D14 CaO, D15 MgO, D16 SO3, D17 Na2O, D18 K2O, D213 Cl, D6 LSF, D11 SM, D10 AM, D214 LOI, D19 / D20 residues | lab | `rawMeal*` (Bogue K0), `kilnFeedLsf` / `Sm` / `Am` |
+| Clinker XRD/XRF | `FLSCLINKER` D26 litre weight, D6 SiO2, D8 Al2O3, D11 Fe2O3, D15 CaO, D17 MgO, D19 SO3, D20 Na2O, D22 K2O, D23 Cl, **D24 free lime**, D28 sum, D5 LSF, D13 SM, D10 AM, **D18 C3S**, D16 C2S, D14 C3A, D21 C4AF, D29 LC, D30 A/S, D31 alkalies | lab | `actualC3S`, `freeLime`, `clinkerSO3` |
+| Calciner hot meal | `FLSCALCINATION1`, `FLSCALCINATION2`: D15 cyclone LOI, D16 % calcination, D5 SO3, D8 Na2O, D9 K2O, D11 Cl, D17 threshold (2 Cl + SO3), D18 A/S; `FLSCALCINATION`: D14 kiln feed LOI, D15 / D16 / D17 averages (SO3, calcination, temperature) | lab | — |
 | Fuel lab | `JSWCOAL_A1` D12 kiln-coal ash, D17 PC-coal ash, D22 AFR NCV | lab | `coalAsh`, `pcCoalAsh`, `afrNcv` |
 | Bomb calorimeters | `JSWBMBCLRMTR_KC` D18, `JSWBMBCLRMTR_PC` D18 | lab | `coalNcv`, `pcCoalNcv` (historical RCA only; defaults 5100 / AFR 3100 until cached) |
 | Model outputs | `JSW_C3S` D0–D8 (writers JSW_S5 physics, JSW_S9 Bogue + Ridge), MQTT `devicesIn/JSW_C3S/data` | lab | `predictedC3S` = **D7**; D5 (old physics C3S) listed but hidden |
 | Kiln DCS | `ABBKLN_A1` D154 kiln coal, D155 PC coal, D156 low-NOx coal (t/h) | process | `kilnCoal`, `pcCoal`, `lowNoxCoal` |
-| Preheater DCS | `ABBBHPH_A1` D63 kiln feed (t/h) | process | `kilnFeed` |
+| Preheater DCS | `ABBBHPH_A1` D63 kiln feed (t/h) (the quality table pairs the clinker sample with it at the hour start) | process | `kilnFeed` |
 | AFR feeding | `ABBKLNAFRSGC_A1` D2 solid AFR (t/h) | process | `solidAfr` |
+| Calciner DCS | `JSWCALN_A1` D0 / D1 calciner 1 / 2 temperature (°C) — ABB source tag still to be confirmed | process | — |
 | RCA insight | `INS_c3snandyalrca` | #4 | — |
 
-Three `D18`s (clinker C3S, two NCVs) and two `D7`s (raw-meal SiO2, predicted C3S) exist on this
-line; the key scheme keeps them apart (unit-tested, browser-tested).
+The second list (quality-laboratory device table, 2026-10-31) confirmed the clinker (D18 / D24 /
+D19) and kiln-feed tags of the first and added the rest. Its **data-status column is carried in
+each tag's meaning**: raw mill and ball mill XRF "being captured"; kiln feed XRF and clinker oxides
+"1 or no samples a day against 12 expected"; **clinker C3S, free lime, moduli and Bogue phases
+"not being captured"**; manual entries (mix proportions, residues, litre weight, LOIs) "not being
+filled"; the derived calcination figures "method / parser update needed". Until the clinker feed is
+fixed the C3S trend, zones and timeline will be thin on live data.
+
+Three `D18`s (clinker C3S, two NCVs), two `D7`s (raw-meal SiO2, predicted C3S) and the same XRF
+layout on three devices exist on this line; the key scheme keeps them apart (unit-tested,
+browser-tested).
+
+**Specification limits** come from the targets in the quality table's column headers (`specLimits`
+in `jsw.ts`, basis "Plant target (quality table)"): clinker C3S 50 ± 2 (predicted judged the same),
+free lime < 1.5, SO3 < 1.00, LSF 92–95, SM 2.2–2.3, AM 1.3–1.5, C2S 20–25, C3A 6–8, C4AF 11–13, LC
+27.5–28.5, A/S 0.6–1.0; kiln feed LSF 100 ± 2, SM 2.3 ± 0.1, AM 1.3 ± 0.1, Al2O3 3.5–3.6, Fe2O3
+3.0–3.1; raw mill LSF 100 ± 2, SM 1.8–2.0, AM 0.9–1.1, Al2O3 3.5–3.6, Fe2O3 3.0–3.1; calcination
+90–94 %, calciner SO3 < 2.00, temperature < 980 °C. One-sided targets set the one limit they state.
 
 **What the dashboard shows for JSW with this list, and what it does not:**
 
 | Feature | State |
 |---|---|
 | C3S trend, histogram, 48-h timeline, zone plots, RCA panel, recommendations, shift reports | On (predicted `JSW_C3S:D7`, lab `FLSCLINKER:D18`, free lime `FLSCLINKER:D24`) |
-| Compliance, lab rows | C3S (actual, predicted) and free lime only, judged against the **RCA insight's own target bands** (shown as the basis) until plant LSL / USL are supplied |
+| Compliance, lab rows | 25 rows from the quality-table targets (above); no row falls back to the insight bands |
 | Compliance, process rows | **Off** — no kiln-feed bin limit table; the table says so |
 | Kiln-operation trends | Only PC coal and kiln coal; **no BZT, SAT, TAD, kiln inlet O2, kiln speed, cooler flow, filling degree** (no tags) |
-| RCA-named parameters | Fuel rates, kiln feed, fuel ash, NCV, free lime, raw-meal oxides resolve; **LSF / raw-mix / air-side / kiln-speed mentions resolve to nothing** (no tags) |
+| RCA-named parameters | Fuel rates, kiln feed, fuel ash, NCV, free lime, raw-meal oxides, kiln feed LSF, raw-mix moduli resolve; **air-side / kiln-speed mentions resolve to nothing** (no tags) |
 | Data cut-off | None (loads to the newest sample) |
 | SHC Optimizer link | "Not configured for JSW Cement" until `shcOptimizerUrl` is set |
 | Brand | Wordmark "JSW Cement" until a logo file is supplied |
 
 **To verify / still needed from the plant (the open questions):**
 
-1. **Devices, sensors.** Confirm the device of "Low-NOx ash used": the list says `JSW_S5` (the writer); it is read here as `JSW_C3S:D2`. Confirm `D214` on `FLSKILNFEED` (the only three-digit tag on a lab device). Confirm the nine devices are in the dashboard account (the Adani devices were readable only because #2/#3 are not account-scoped).
+1. **Devices, sensors.** Confirm the device of "Low-NOx ash used": the list says `JSW_S5` (the writer); it is read here as `JSW_C3S:D2`. Confirm the calciner temperature tags (`JSWCALN_A1` D0 / D1, "find cyclone 1 tag in ABB"). Confirm the fifteen devices are in the dashboard account (the Adani devices were readable only because #2/#3 are not account-scoped). Most important: the quality table says clinker C3S and free lime are **not being captured** — the dashboard cannot work until they are.
 2. **Kiln operation tags** (needed for the kiln trends, filling degree, RCA air-side mapping, bin compliance): kiln speed (rpm), burning zone temperature, secondary air temperature, tertiary air temperature, kiln inlet O2 and temperature, PC outlet temperature, cooler grate speed, cooler fan flows — device + sensor each.
-3. **Laboratory tags not in the list:** kiln feed LSF / SM / AM (the RCA names LSF; only the oxides were given — LSF could be computed from them, but the plant's own figure is preferred), raw-mix moduli, AFR ash (furnace), clinker SiO2 / Al2O3 / Fe2O3 / CaO / MgO, hot meal.
+3. **Laboratory tags still not in the lists:** AFR ash (furnace); coal moisture / volatiles if the RCA names them.
 4. **Insight schema.** Does `INS_c3snandyalrca` return the same `result.rca` fields as `INS_df1b3c1a11de` (`time`, `c3s`, `fcao`, `zone`, `targets`, `lime_level_definition`, `root_cause{}`, `recommendations{}`, shift summaries with `kind: "shift"`)? The parser is schema-driven and tolerant, but zones and targets need those fields. Are its times plant-local like Adani's?
-5. **Limits.** Plant LSL / USL (with their basis) for C3S, free lime, ash, NCV and the raw-meal oxides; and, if a golden-period limit table per kiln-feed bin exists for Nandyal, that table (its bins, the Adani edges 370–565 t/h do not apply).
+5. **Limits.** The quality-table targets are in; still needed: limits for coal / AFR ash and NCV, and, if a golden-period limit table per kiln-feed bin exists for Nandyal, that table (its bins, the Adani edges 370–565 t/h do not apply).
 6. **Kiln filling degree:** the plant's anchor (feed, rpm, %) and norm / flag levels, once a kiln speed tag exists.
 7. **Operations:** shift pattern (A/B/C 06/14/22 assumed), SHC Optimizer URL, logo file, any data cut-off, and the prediction cadence of `JSW_C3S:D7` (the ±15 min match tolerance assumes a 15-minute cycle).
 8. **Output tags.** The dashboard only reads; `JSW_C3S` D0–D8 are listed under "Model Outputs" for inspection. Nothing publishes to `devicesIn/JSW_C3S/data` from here.

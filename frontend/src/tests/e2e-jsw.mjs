@@ -2,7 +2,7 @@
  * Browser check for the JSW Cement line.
  *
  * No session token for the JSW account is available in this environment, so the platform is
- * simulated: each of the line's nine devices answers with SYNTHETIC rows in the platform's real
+ * simulated: each of the line's fifteen devices answers with SYNTHETIC rows in the platform's real
  * response shape (these are not plant values), and the RCA insight `INS_c3snandyalrca` answers in
  * the schema `INS_df1b3c1a11de` returns today (the JSW insight's own schema is still to be
  * verified). What this proves is the configuration: the dashboard reads the right device and
@@ -41,9 +41,17 @@ const wave = (t, base, amp, periodH) => base + amp * Math.sin((t / HOUR / period
 /** Every device of the JSW line, by id, as a function of the window asked for. */
 const DEVICES = {
   // Clinker XRD/XRF: a sample about every 2 h. D18 lab C3S, D24 free lime, D19 SO3.
-  FLSCLINKER: (s, e) => rows(s, e, 2 * HOUR, (t) => ({ D18: +wave(t, 61, 2, 36).toFixed(2), D24: +wave(t, 1.4, 0.5, 20).toFixed(2), D19: 0.9 })),
-  // Kiln feed XRF: every 2 h, offset. D7 SiO2 (a D7 that is NOT the predicted C3S).
-  FLSKILNFEED: (s, e) => rows(s, e - 17 * MIN, 2 * HOUR, () => ({ D14: 43.1, D7: 13.6, D8: 3.2, D13: 2.1, D214: 35.4 })),
+  FLSCLINKER: (s, e) => rows(s, e, 2 * HOUR, (t) => ({ D18: +wave(t, 61, 2, 36).toFixed(2), D24: +wave(t, 1.4, 0.5, 20).toFixed(2), D19: 0.9, D6: 21.8, D8: 5.4, D11: 3.9, D15: 65.1, D5: 93.5, D13: 2.25, D10: 1.4, D16: 18.2, D14: 7.6, D21: 11.9 })),
+  // Kiln feed XRF: every 2 h, offset. D7 SiO2 (a D7 that is NOT the predicted C3S). D6 LSF, D11 SM, D10 AM.
+  FLSKILNFEED: (s, e) => rows(s, e - 17 * MIN, 2 * HOUR, (t) => ({ D14: 43.1, D7: 13.6, D8: 3.2, D13: 2.1, D15: 1.9, D16: 0.3, D17: 0.2, D18: 0.6, D6: +wave(t, 100, 1.5, 30).toFixed(1), D11: 2.31, D10: 1.29 })),
+  // Raw mill and ball mill XRF: the same layout as the kiln feed, every 2 h.
+  FLSRAWMILL01: (s, e) => rows(s, e - 40 * MIN, 2 * HOUR, (t) => ({ D7: 13.4, D8: 3.5, D13: 3.0, D14: 43.0, D6: +wave(t, 100.5, 2, 24).toFixed(1), D11: 1.9, D10: 1.0 })),
+  FLSBALLMILL: (s, e) => rows(s, e - 50 * MIN, 4 * HOUR, () => ({ D7: 13.5, D8: 3.4, D13: 3.1, D14: 42.9, D6: 99.8, D11: 1.95, D10: 1.02 })),
+  // Calciner hot meal, two streams and their averages; calciner temperatures on the DCS.
+  FLSCALCINATION1: (s, e) => rows(s, e - 25 * MIN, 2 * HOUR, () => ({ D5: 1.6, D8: 0.3, D9: 1.1, D11: 0.4, D16: 92.1 })),
+  FLSCALCINATION2: (s, e) => rows(s, e - 25 * MIN, 2 * HOUR, () => ({ D5: 1.8, D8: 0.3, D9: 1.2, D11: 0.5, D16: 91.4 })),
+  FLSCALCINATION: (s, e) => rows(s, e - 25 * MIN, 2 * HOUR, () => ({ D15: 1.7, D16: 91.75, D17: 905 })),
+  JSWCALN_A1: (s, e) => rows(s, e, MIN, (t) => ({ D0: +wave(t, 900, 15, 3).toFixed(0), D1: +wave(t, 910, 15, 4).toFixed(0) })),
   // Fuel lab: daily.
   JSWCOAL_A1: (s, e) => rows(s, e, 24 * HOUR, () => ({ D12: 31.2, D17: 33.8, D22: 3150 })),
   // Bomb calorimeters: daily. Both D18 — neither is the clinker C3S.
@@ -191,7 +199,7 @@ await step('the JSW line is selected, branded by name, and reads its own insight
   if (requested.some((r) => r.kind === 'insight' && r.insight !== 'INS_c3snandyalrca')) throw new Error('another plant’s insight was requested')
 })
 
-await step('every one of the nine devices is read, and no Adani device is', async () => {
+await step('every one of the fifteen devices is read, and no Adani device is', async () => {
   const devs = new Set(requested.filter((r) => r.kind === 'range').map((r) => r.devID))
   for (const d of Object.keys(DEVICES)) if (!devs.has(d)) throw new Error(`${d} was never requested`)
   if ([...devs].some((d) => d.startsWith('ADANI'))) throw new Error('an Adani device was requested on the JSW line')
@@ -199,18 +207,22 @@ await step('every one of the nine devices is read, and no Adani device is', asyn
   if (!probes.includes('FLSCLINKER:D18') || !probes.includes('JSW_C3S:D7')) throw new Error(`newest-sample probe should ask FLSCLINKER:D18 and JSW_C3S:D7, asked ${probes.join(' ')}`)
 })
 
-await step('Executive View: C3S from the right devices, compliance from the insight bands, no bin table', async () => {
+await step('Executive View: C3S from the right devices, compliance from the plant targets, no bin table', async () => {
   const legend = await page.locator('.legend').first().innerText()
   if (!legend.includes('Clinker C3S (XRD)') || !legend.includes('Predicted C3S (Bogue + Ridge)')) throw new Error(`trend legend names: ${legend}`)
   const table = page.locator('table.comp')
   const c3s = table.locator('tr[data-param="FLSCLINKER:D18"]')
-  if (!(await c3s.locator('.comp__limits').innerText()).includes('RCA insight target band')) throw new Error('lab C3S should be judged against the insight band and say so')
+  if (!(await c3s.locator('.comp__limits').innerText()).includes('LSL 48 · USL 52 % · Plant target (quality table): 50 ± 2')) throw new Error('lab C3S should be judged against the plant target and say so')
+  const lsf = table.locator('tr[data-param="FLSKILNFEED:D6"]')
+  if (!(await lsf.locator('.comp__limits').innerText()).includes('LSL 98 · USL 102')) throw new Error('kiln feed LSF should carry its 100 ± 2 target')
+  if (!(await table.locator('tr[data-param="FLSCLINKER:D24"] .comp__limits').innerText()).includes('LSL — · USL 1.5')) throw new Error('free lime should be one-sided (< 1.5)')
   if (!(await c3s.locator('.comp__within').innerText()).match(/^\d/)) throw new Error('lab C3S compliance should be a percentage')
   const fl = table.locator('tr[data-param="FLSCLINKER:D24"]')
   if (!(await fl.locator('.comp__name').innerText()).includes('Clinker free lime')) throw new Error('free lime row missing')
   if ((await table.locator('tr[data-param^="ABB"]').count()) !== 0) throw new Error('no process row may be judged without a bin table')
   const note = await page.locator('.panel', { hasText: 'Specification Compliance' }).innerText()
   if (!note.includes('No kiln-feed bin limit table is configured for JSW Cement')) throw new Error('the table should say why process rows are absent')
+  if (note.includes('RCA insight target band')) throw new Error('no row should fall back to the insight bands now that the plant supplied targets')
   const shifts = await page.locator('.shifts').innerText()
   if (!shifts.includes('Shift')) throw new Error('shift reports did not render')
   if (!shifts.includes('Kiln coal') || !shifts.includes('Solid AFR')) throw new Error(`shift recommendations should list the insight’s set-point moves: ${shifts.replace(/\s+/g, ' ').slice(0, 400)}`)
@@ -230,10 +242,21 @@ await step('C3S Analysis: the 48-hour timeline classifies with JSW_C3S:D7 and FL
 
 await step('lab quality groups the six laboratory devices by material, keeps the three D18s apart, hides the old physics C3S', async () => {
   const tabs = await page.locator('.lab__tab-name').allInnerTexts()
-  for (const want of ['Clinker Quality', 'Kiln Feed Quality', 'Fuel Quality', 'Model Outputs']) if (!tabs.includes(want)) throw new Error(`lab groups: ${tabs.join(' | ')}`)
+  for (const want of ['Raw Mill (Raw Meal) Quality', 'Ball Mill (Raw Meal) Quality', 'Kiln Feed Quality', 'Clinker Quality', 'Calciner 1 Hot Meal Quality', 'Calciner 2 Hot Meal Quality', 'Calcination — Combined', 'Fuel Quality', 'Model Outputs']) if (!tabs.includes(want)) throw new Error(`lab groups: ${tabs.join(' | ')}`)
+  await page.getByRole('tab', { name: /^Clinker Quality/ }).click()
   const cells = async () => page.locator('.lab-cell').evaluateAll((els) => els.map((e) => [e.getAttribute('title'), e.querySelector('.lab-cell__name')?.textContent?.trim()]))
   const clinker = await cells()
   if (!clinker.some(([k, n]) => k === 'FLSCLINKER:D18' && n === 'Clinker C3S (XRD)')) throw new Error(`clinker cells: ${JSON.stringify(clinker)}`)
+  if (!clinker.some(([k, n]) => k === 'FLSCLINKER:D5' && n === 'Clinker LSF')) throw new Error('clinker LSF (D5) missing')
+  // A parameter the quality table lists but the feed does not carry yet shows "no sample", not nothing.
+  const litre = await page.locator('.lab-cell[title="FLSCLINKER:D26"]').innerText()
+  if (!litre.includes('no sample')) throw new Error(`litre weight (not being filled) should read "no sample": ${litre}`)
+  await page.getByRole('tab', { name: /Kiln Feed Quality/ }).click()
+  const kf = await page.locator('.lab-cell').evaluateAll((els) => els.map((e) => [e.getAttribute('title'), e.querySelector('.lab-cell__name')?.textContent?.trim()]))
+  if (!kf.some(([k, n]) => k === 'FLSKILNFEED:D6' && n === 'Kiln feed LSF')) throw new Error(`kiln feed cells: ${JSON.stringify(kf)}`)
+  await page.getByRole('tab', { name: /Raw Mill/ }).click()
+  const rm = await page.locator('.lab-cell').evaluateAll((els) => els.map((e) => [e.getAttribute('title'), e.querySelector('.lab-cell__name')?.textContent?.trim()]))
+  if (!rm.some(([k, n]) => k === 'FLSRAWMILL01:D6' && n === 'Raw mill LSF')) throw new Error(`raw mill cells: ${JSON.stringify(rm)}`)
   await page.getByRole('tab', { name: /Fuel Quality/ }).click()
   const fuel = await cells()
   if (!fuel.some(([k, n]) => k === 'JSWBMBCLRMTR_KC:D18' && n === 'Kiln coal NCV')) throw new Error(`fuel cells: ${JSON.stringify(fuel)}`)
@@ -262,7 +285,7 @@ await step('process monitoring lists the named DCS tags by section and the unnam
   const names = groups.map((g) => g.replace(/\d+$/, '').trim().toLowerCase())
   for (const want of ['kiln', 'calciner', 'preheater', 'unnamed signals']) if (!names.includes(want)) throw new Error(`process sections: ${names.join(' | ')}`)
   const items = await page.locator('.process__item').evaluateAll((els) => els.map((e) => e.getAttribute('title')))
-  for (const want of ['ABBKLN_A1:D154', 'ABBBHPH_A1:D63', 'ABBKLNAFRSGC_A1:D2', 'ABBKLN_A1:D7']) if (!items.includes(want)) throw new Error(`process items: ${items.join(' ')}`)
+  for (const want of ['ABBKLN_A1:D154', 'ABBBHPH_A1:D63', 'ABBKLNAFRSGC_A1:D2', 'JSWCALN_A1:D0', 'ABBKLN_A1:D7']) if (!items.includes(want)) throw new Error(`process items: ${items.join(' ')}`)
   // ABBKLN_A1:D7 (unnamed, 812) is not the predicted C3S JSW_C3S:D7.
   await page.locator('.process__item[title="ABBKLN_A1:D7"]').click()
   const detail = await page.locator('.process__detail').innerText()

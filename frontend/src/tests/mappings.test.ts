@@ -240,10 +240,37 @@ describe('display labels', () => {
 })
 
 describe('JSW Cement: the line from the tag list', () => {
-  it('has nine devices, six read as laboratory and three as process', () => {
-    expect(JSW.labDevices).toEqual(['FLSCLINKER', 'FLSKILNFEED', 'JSWCOAL_A1', 'JSWBMBCLRMTR_KC', 'JSWBMBCLRMTR_PC', 'JSW_C3S'])
-    expect(JSW.processDevices).toEqual(['ABBKLN_A1', 'ABBBHPH_A1', 'ABBKLNAFRSGC_A1'])
+  it('has fifteen devices, eleven read as laboratory and four as process', () => {
+    expect(JSW.labDevices).toEqual([
+      'FLSRAWMILL01',
+      'FLSBALLMILL',
+      'FLSKILNFEED',
+      'FLSCLINKER',
+      'FLSCALCINATION1',
+      'FLSCALCINATION2',
+      'FLSCALCINATION',
+      'JSWCOAL_A1',
+      'JSWBMBCLRMTR_KC',
+      'JSWBMBCLRMTR_PC',
+      'JSW_C3S',
+    ])
+    expect(JSW.processDevices).toEqual(['ABBKLN_A1', 'ABBBHPH_A1', 'ABBKLNAFRSGC_A1', 'JSWCALN_A1'])
     expect(JSW.insightId).toBe('INS_c3snandyalrca')
+  })
+
+  it('reads the quality table: moduli on the kiln feed and raw mill, the full clinker chemistry, two calciner streams', () => {
+    expect(JSW.role('kilnFeedLsf')).toBe('FLSKILNFEED:D6')
+    expect(JSW.role('kilnFeedSm')).toBe('FLSKILNFEED:D11')
+    expect(JSW.role('kilnFeedAm')).toBe('FLSKILNFEED:D10')
+    expect(JSW.role('rawMixLsf')).toBe('FLSRAWMILL01:D6')
+    // The same D-tag layout on three devices stays three different parameters.
+    expect([JSW.label('FLSRAWMILL01:D7'), JSW.label('FLSBALLMILL:D7'), JSW.label('FLSKILNFEED:D7')]).toEqual(['Raw mill SiO2', 'Ball mill SiO2', 'Kiln feed SiO2'])
+    expect(JSW.label('FLSCLINKER:D5')).toBe('Clinker LSF')
+    expect(JSW.label('FLSCLINKER:D16')).toBe('Clinker C2S')
+    expect(JSW.label('FLSCALCINATION1:D16')).toBe('Calciner 1 calcination')
+    expect(JSW.label('FLSCALCINATION:D17')).toBe('Average calciner temperature')
+    expect(JSW.label('JSWCALN_A1:D1')).toBe('Calciner 2 temperature')
+    expect(JSW.groups('lab').map((g) => g.id)).toEqual(['raw_mill', 'ball_mill', 'kiln_feed', 'clinker', 'calciner_1', 'calciner_2', 'calciner_avg', 'fuel', 'model_output'])
   })
 
   it('reads predicted C3S from the model device and the lab check from the clinker XRD', () => {
@@ -262,7 +289,7 @@ describe('JSW Cement: the line from the tag list', () => {
     expect(JSW.role('coalNcv')).toBe('JSWBMBCLRMTR_KC:D18')
     expect(JSW.role('pcCoalNcv')).toBe('JSWBMBCLRMTR_PC:D18')
     // And the two D7s.
-    expect(JSW.label('FLSKILNFEED:D7')).toBe('Raw meal SiO2')
+    expect(JSW.label('FLSKILNFEED:D7')).toBe('Kiln feed SiO2')
   })
 
   it('maps the kiln operation roles the list supplies, on their own DCS devices', () => {
@@ -279,13 +306,12 @@ describe('JSW Cement: the line from the tag list', () => {
   })
 
   it('leaves the roles the list does not cover unmapped, so their features stay off', () => {
-    for (const r of ['kilnRpm', 'burningZoneTemp', 'secondaryAirTemp', 'tertiaryAirTemp', 'kilnInletO2', 'kilnFeedLsf', 'afrAsh', 'rawMixLsf'] as const) {
+    for (const r of ['kilnRpm', 'burningZoneTemp', 'secondaryAirTemp', 'tertiaryAirTemp', 'kilnInletO2', 'afrAsh'] as const) {
       expect(JSW.role(r)).toBeNull()
     }
     expect(JSW.kilnFilling).toBeNull()
     expect(JSW.coolerFanFlows).toEqual([])
     expect(JSW.binLimits).toBeNull()
-    expect(JSW.spec.specLimits ?? []).toEqual([])
   })
 
   it('hides the superseded physics C3S so one predicted C3S is shown, and records the outputs', () => {

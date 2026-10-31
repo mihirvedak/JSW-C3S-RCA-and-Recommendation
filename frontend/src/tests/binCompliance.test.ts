@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { binCompliance, binLimit, binOf } from '../lib/binCompliance'
 import { specRows } from '../config/specLimits'
+import { buildLine } from '../config/lineModel'
 import type { TimestampRow } from '../lib/series'
 import { ADANI, JSW, lab, raw } from './lines'
 
@@ -104,8 +105,23 @@ describe('laboratory specification limits', () => {
     expect(specRows(ADANI, T).find((r) => r.key === lab('D58'))?.basis).toBe('Plant: 43 ± 1.5')
   })
 
-  it('falls back to the insight’s target bands for a plant without limits, and says so', () => {
+  it('uses the JSW quality-table targets, one-sided where the plant states one limit', () => {
     const rows = specRows(JSW, T)
+    const byKey = new Map(rows.map((r) => [r.key, r]))
+    expect([byKey.get('FLSCLINKER:D18')?.lsl, byKey.get('FLSCLINKER:D18')?.usl]).toEqual([48, 52])
+    expect([byKey.get('JSW_C3S:D7')?.lsl, byKey.get('JSW_C3S:D7')?.usl]).toEqual([48, 52])
+    expect([byKey.get('FLSCLINKER:D24')?.lsl, byKey.get('FLSCLINKER:D24')?.usl]).toEqual([null, 1.5])
+    expect([byKey.get('FLSKILNFEED:D6')?.lsl, byKey.get('FLSKILNFEED:D6')?.usl]).toEqual([98, 102])
+    expect([byKey.get('FLSCALCINATION:D17')?.lsl, byKey.get('FLSCALCINATION:D17')?.usl]).toEqual([null, 980])
+    // The plant's targets win over the insight's bands, and none falls back to them.
+    expect(rows.some((r) => /RCA insight target band/.test(r.basis ?? ''))).toBe(false)
+    for (const r of rows) expect(r.lsl == null || r.usl == null || r.lsl < r.usl).toBe(true)
+  })
+
+  it('falls back to the insight’s target bands for a line without any limits, and says so', () => {
+    const bare = { ...JSW.spec, specLimits: [] }
+    const line = buildLine(JSW.plant, bare)
+    const rows = specRows(line, T)
     expect(rows.map((r) => [r.key, r.lsl, r.usl])).toEqual([
       ['FLSCLINKER:D18', 41.5, 44.5],
       ['JSW_C3S:D7', 41.5, 44.5],
@@ -113,6 +129,6 @@ describe('laboratory specification limits', () => {
     ])
     expect(rows.every((r) => /RCA insight target band/.test(r.basis ?? ''))).toBe(true)
     // Without targets the rows exist but classify nothing.
-    expect(specRows(JSW, null).map((r) => [r.lsl, r.usl, r.basis])).toEqual([[null, null, null], [null, null, null], [null, null, null]])
+    expect(specRows(line, null).map((r) => [r.lsl, r.usl, r.basis])).toEqual([[null, null, null], [null, null, null], [null, null, null]])
   })
 })
