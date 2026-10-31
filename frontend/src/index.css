@@ -1,0 +1,36 @@
+/**
+ * Base reset.
+ *
+ * The Vite starter page this file originally styled has been replaced by the dashboard,
+ * so its fixed-width, centred `#root` rules are gone. All dashboard theming lives in
+ * App.css; this file only normalises the document.
+ */
+
+:root {
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Honour a reduced-motion preference for the spinners and the refresh indicator. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

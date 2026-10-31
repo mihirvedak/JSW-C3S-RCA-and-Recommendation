@@ -4,7 +4,7 @@
 
     The framework & variation to be used:
     - **Framework**: react
-    - **Variant**: nextjs
+    - **Variant**: vite
     - **Creation Method**: template
 
     ## Project Structure

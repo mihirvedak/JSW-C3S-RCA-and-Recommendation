@@ -1,7 +1,7 @@
 # JSW C3S RCA and Recommendation - AI Assistant Guide
 
     ## Project: IOsense Platform Integration
-    Framework: react | Template: nextjs
+    Framework: react | Template: vite
 
     ## MCP Tools (REQUIRED)
 
