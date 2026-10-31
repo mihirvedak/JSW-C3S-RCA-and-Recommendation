@@ -2,8 +2,8 @@
  * Plant, line and time range: the scope every view reads, in one bar above the view's content.
  *
  * Plants and lines come from `config/plants.ts`. Picking a plant offers its lines; picking a
- * line rescopes every load on the page (lab device, process device, RCA insight). A selector
- * with a single option stays enabled so it reads as a choice that exists, not a broken control.
+ * line rescopes every load on the page (its devices and RCA insight). A selector with a single
+ * option stays enabled so it reads as a choice that exists, not a broken control.
  */
 
 import { TimeRangePicker } from './TimeRangePicker'
@@ -53,7 +53,7 @@ export function ScopeBar({
           className="field__input"
           value={current.id}
           onChange={(e) => onLineChange({ plantId: plant.id, lineId: e.target.value })}
-          title={`${current.labDevice} · ${current.processDevice} · ${current.insightId}`}
+          title={`${current.devices.map((d) => d.devID).join(' · ')} · ${current.insightId}`}
         >
           {plant.lines.map((l) => (
             <option key={l.id} value={l.id}>{l.name}</option>

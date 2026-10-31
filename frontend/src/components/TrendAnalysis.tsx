@@ -27,16 +27,9 @@ import type { EventContext } from '../hooks/useEventContext'
 import { clampEnd } from '../config/dataWindow'
 import { relevantParameters } from '../config/rcaParameters'
 import type { RelevantParameter } from '../config/rcaParameters'
-import { PROCESS_DEVICE, getSensor } from '../config/deviceMappings'
-import {
-  FILL_FLAG,
-  FILL_SPEED_TARGET,
-  KILN_OPERATION_TRENDS,
-  TREND_EXCLUDED_TAGS,
-  fillingStats,
-  rpmForFilling,
-  tagTrend,
-} from '../config/kilnTrends'
+import { useLine } from '../config/LineContext'
+import type { LineModel } from '../config/lineModel'
+import { FILL_KEY, fillingStats, kilnOperationTrends, rpmForFilling, tagTrend } from '../config/kilnTrends'
 import type { TrendDef } from '../config/kilnTrends'
 import { extractSeries } from '../lib/series'
 import type { Point, TimestampRow } from '../lib/series'
@@ -130,6 +123,7 @@ function LastSamples({
   trends: EventTrends
   eventMs: number
 }) {
+  const line = useLine()
   if (trends.labLoading) return <LoadingState message="Loading laboratory samples…" />
   if (trends.labError) {
     return (
@@ -141,7 +135,7 @@ function LastSamples({
     )
   }
 
-  const rows = params.map((p) => ({ p, samples: lastSamples(trends.labRows, p.sensorId, eventMs) }))
+  const rows = params.map((p) => ({ p, samples: lastSamples(trends.labRows, p.key, eventMs) }))
 
   return (
     <div className="etrend__table-wrap">
@@ -158,13 +152,13 @@ function LastSamples({
         </thead>
         <tbody>
           {rows.map(({ p, samples }) => {
-            const def = getSensor(p.devID, p.sensorId)
+            const def = line.describe(p.key)
             return (
-              <tr key={p.sensorId}>
+              <tr key={p.key}>
                 <th scope="row">
-                  <span className="etrend__param" title={`${p.devID}:${p.sensorId}`}>
-                    {def?.label ?? p.sensorId}
-                    {def?.unit ? <span className="etrend__unit"> {def.unit}</span> : null}
+                  <span className="etrend__param" title={p.key}>
+                    {def.label}
+                    {def.unit ? <span className="etrend__unit"> {def.unit}</span> : null}
                   </span>
                   <Sources sources={p.sources} />
                 </th>
@@ -227,7 +221,7 @@ function TrendCard({
     <article className="etrend__card" data-trend={def.key}>
       <header className="etrend__card-head">
         <div>
-          <h4 title={def.tags.map((t) => `${PROCESS_DEVICE}:${t}`).join(', ')}>{def.label}</h4>
+          <h4 title={def.tags.join(', ')}>{def.label}</h4>
           {def.quality && def.quality !== 'usable' ? (
             <Badge tone="warn" title="The process tag map's own grading of this signal">
               tag map: {def.quality}
@@ -255,7 +249,7 @@ function TrendCard({
         </div>
       </header>
       {def.note ? <p className="etrend__note">{def.note}</p> : null}
-      {def.key === 'kiln-fill' ? <FillingFigures points={points} at={at} rows={rows} atEvent={eventMs != null} /> : null}
+      {def.key === FILL_KEY ? <FillingFigures points={points} at={at} rows={rows} atEvent={eventMs != null} /> : null}
       {points.length < 2 ? (
         <p className="trend__empty">No readings for this trend in {scope}.</p>
       ) : (
@@ -280,24 +274,25 @@ function TrendCard({
  * One grid of cards: the fixed kiln-operation trends, then any other process tag the RCA names
  * (each labelled with the RCA's wording). Tags the plant asked not to chart are left out.
  */
-function trendCards(params: readonly RelevantParameter[]): TrendCardData[] {
-  const named = new Map(params.map((p) => [p.sensorId, p.sources]))
-  const coreTags = new Set(KILN_OPERATION_TRENDS.filter((d) => d.tags.length === 1).map((d) => d.tags[0]))
+function trendCards(line: LineModel, params: readonly RelevantParameter[]): TrendCardData[] {
+  const core = kilnOperationTrends(line)
+  const named = new Map(params.map((p) => [p.key, p.sources]))
+  const coreTags = new Set(core.filter((d) => d.tags.length === 1).map((d) => d.tags[0]))
   return [
-    ...KILN_OPERATION_TRENDS.map((def) => ({
+    ...core.map((def) => ({
       def,
       sources: def.tags.length === 1 ? (named.get(def.tags[0]) ?? []) : [],
     })),
     ...params
-      .filter((p) => !coreTags.has(p.sensorId) && !TREND_EXCLUDED_TAGS.has(p.sensorId))
-      .map((p) => ({ def: tagTrend(p.sensorId), sources: p.sources })),
+      .filter((p) => !coreTags.has(p.key) && !line.isTrendExcluded(p.key))
+      .map((p) => ({ def: tagTrend(line, p.key), sources: p.sources })),
   ]
 }
 
 /**
  * The filling degree's own figures over the time shown: median, the share of readings above the
- * flag, and the kiln speed that would bring the reading at the event (or the newest one) to 19 %
- * (rpm × filling / 19).
+ * plant's flag level, and the kiln speed that would bring the reading at the event (or the newest
+ * one) to the plant's target filling (rpm × filling / target).
  */
 function FillingFigures({
   points,
@@ -310,9 +305,13 @@ function FillingFigures({
   rows: readonly TimestampRow[]
   atEvent: boolean
 }) {
-  const stats = fillingStats(points)
-  const rpm = at ? valueAt(extractSeries(rows, 'D73'), at.t) : null
-  const rpm19 = at && rpm ? rpmForFilling(rpm.v, at.v) : null
+  const line = useLine()
+  const spec = line.kilnFilling
+  const rpmKey = line.role('kilnRpm')
+  if (!spec || !rpmKey) return null
+  const stats = fillingStats(points, spec.flagAbove)
+  const rpm = at ? valueAt(extractSeries(rows, rpmKey), at.t) : null
+  const rpmTarget = at && rpm ? rpmForFilling(rpm.v, at.v, spec.speedTarget) : null
   return (
     <dl className="etrend__figs">
       <div>
@@ -320,19 +319,19 @@ function FillingFigures({
         <dd>{stats.median == null ? '—' : `${stats.median.toFixed(2)} %`}</dd>
       </div>
       <div>
-        <dt>Above {FILL_FLAG} %</dt>
+        <dt>Above {spec.flagAbove} %</dt>
         <dd className={stats.abovePct ? 'is-flag' : undefined}>
           {stats.abovePct == null ? '—' : `${stats.abovePct.toFixed(1)} % of the time shown`}
         </dd>
       </div>
       <div>
-        <dt>Speed for {FILL_SPEED_TARGET} %</dt>
+        <dt>Speed for {spec.speedTarget} %</dt>
         <dd
           title={
-            rpm ? `rpm × filling / ${FILL_SPEED_TARGET}, from ${rpm.v.toFixed(2)} rpm ${atEvent ? 'at the event' : 'at the newest reading'}` : undefined
+            rpm ? `rpm × filling / ${spec.speedTarget}, from ${rpm.v.toFixed(2)} rpm ${atEvent ? 'at the event' : 'at the newest reading'}` : undefined
           }
         >
-          {rpm19 == null ? '—' : `${rpm19.toFixed(2)} rpm`}
+          {rpmTarget == null ? '—' : `${rpmTarget.toFixed(2)} rpm`}
         </dd>
       </div>
     </dl>
@@ -354,13 +353,22 @@ function ProcessTrends({
   maxGapMs: number
   scope: string
 }) {
-  const cards = useMemo(() => trendCards(params), [params])
+  const line = useLine()
+  const cards = useMemo(() => trendCards(line, params), [line, params])
   const series = useMemo(() => {
     const out = new Map<string, Point[]>()
     for (const c of cards) out.set(c.def.key, c.def.series(rows).filter((p) => p.t >= w.start && p.t <= w.end))
     return out
   }, [cards, rows, w.start, w.end])
 
+  if (cards.length === 0) {
+    return (
+      <EmptyState
+        message={`No kiln-operation tags are configured for ${line.plant.name}.`}
+        hint="Map the kiln roles (burning zone, secondary / tertiary air, kiln speed, coal rates, cooler fans) in the line's client spec to chart them here."
+      />
+    )
+  }
   return (
     <div className="etrend__grid">
       {cards.map((c) => (
@@ -409,8 +417,9 @@ export function TrendAnalysis({
   rcaLoading: boolean
   rcaError: { message: string } | null
 }) {
+  const line = useLine()
   const [view, setView] = useState<View>('range')
-  const params = useMemo(() => (event ? relevantParameters(event) : null), [event])
+  const params = useMemo(() => (event ? relevantParameters(event, line) : null), [event, line])
 
   const eventMs = event?.eventTime ?? null
   const ew = eventMs != null ? trendWindow(eventMs) : null

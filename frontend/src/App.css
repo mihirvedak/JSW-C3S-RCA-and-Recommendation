@@ -144,6 +144,24 @@ code {
   .brand__logo { height: 36px; }
 }
 
+/* A plant that has supplied no logo yet: its name, set like a mark. */
+.brand__wordmark {
+  display: block;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  color: var(--c-brand);
+  white-space: nowrap;
+}
+.brand--lg .brand__wordmark { font-size: 30px; }
+
+.appbar__plant {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--c-ink-3);
+}
+
 .appbar__titles h1 {
   margin: 0;
   font-size: 20px;
@@ -1291,6 +1309,12 @@ button.rtl__seg:focus-visible { outline: 2px solid var(--c-ink); outline-offset:
 }
 .shc-link:hover { background: var(--c-info-bg); }
 .shc-link:focus-visible { outline: 2px solid var(--c-brand); outline-offset: 2px; }
+.shc-link--none {
+  border-style: dashed;
+  border-color: var(--c-border);
+  color: var(--c-ink-3);
+  cursor: help;
+}
 
 .visually-hidden {
   position: absolute;

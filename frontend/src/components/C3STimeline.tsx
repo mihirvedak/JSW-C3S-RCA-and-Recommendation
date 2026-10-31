@@ -23,7 +23,7 @@ import { HighchartsReact } from 'highcharts-react-official'
 import type { Band, MatchedSample, Point } from '../lib/series'
 import { breakAtGaps, medianIntervalMs } from '../lib/series'
 import { DISPLAY_TIMEZONE, MINUTE_MS } from '../lib/time'
-import { ACTUAL_C3S, LAB_DEVICE, PREDICTED_C3S, sensorLabel } from '../config/deviceMappings'
+import { useLine } from '../config/LineContext'
 import { ZONE_STYLE } from '../lib/zones'
 import type { ZoneKey } from '../lib/zones'
 
@@ -34,9 +34,6 @@ export interface TrendEvent {
   c3s: number
   zone: ZoneKey
 }
-
-const ACTUAL_LABEL = sensorLabel(LAB_DEVICE, ACTUAL_C3S)
-const PREDICTED_LABEL = sensorLabel(LAB_DEVICE, PREDICTED_C3S)
 
 /** Series colours; the same values as --c-actual / --c-pred / --c-low / --c-high in App.css. */
 const COLOR = {
@@ -106,6 +103,9 @@ export function C3STimeline({
   onSelectEvent,
   predictionZones,
 }: Props) {
+  const line = useLine()
+  const ACTUAL_LABEL = line.label(line.actualC3S)
+  const PREDICTED_LABEL = line.label(line.predictedC3S)
   const chartRef = useRef<HighchartsReact.RefObject>(null)
 
   // The click handler is read through a ref so a new callback identity never rebuilds the
@@ -304,7 +304,7 @@ export function C3STimeline({
         },
       ],
     }
-  }, [predicted, actual, matched, band, windowStart, windowEnd, target, events, predictionZones])
+  }, [predicted, actual, matched, band, windowStart, windowEnd, target, events, predictionZones, ACTUAL_LABEL, PREDICTED_LABEL])
 
   // New data or a new range rebuilds the chart at full extent.
   useEffect(() => {

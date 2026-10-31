@@ -9,16 +9,16 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import type { LineConfig } from '../config/plants'
-import { SHIFTS, SHIFTS_REPORTED } from '../config/shifts'
-import { fetchRange, fetchRangeChunked } from '../services/deviceDataService'
+import type { LineModel } from '../config/lineModel'
+import { SHIFTS_REPORTED } from '../config/shifts'
+import { fetchDevicesRange, fetchDevicesRangeChunked } from '../services/lineDataService'
 import type { RcaFinding } from '../services/rcaService'
 import { AuthError } from '../services/apiClient'
 import { completedShifts } from '../lib/shifts'
 import { buildShiftReport } from '../lib/shiftReport'
 import type { ShiftReport } from '../lib/shiftReport'
 import type { TimestampRow } from '../lib/series'
-import type { ShiftWindow } from '../lib/shifts'
+import type { ShiftDef, ShiftWindow } from '../lib/shifts'
 import { clampEnd } from '../config/dataWindow'
 
 export interface ShiftReports {
@@ -36,9 +36,9 @@ export interface ShiftReports {
  * The last completed shifts at the end of the selected range (capped at `now`), newest first —
  * the shift section's default view.
  */
-export function lastCompletedShifts(rangeEnd: number | null, now: number): ShiftWindow[] {
+export function lastCompletedShifts(shifts: readonly ShiftDef[], rangeEnd: number | null, now: number): ShiftWindow[] {
   // A shift counts as completed only if it ended by the data cut-off too.
-  return rangeEnd == null ? [] : completedShifts(SHIFTS, clampEnd(Math.min(rangeEnd, now)), SHIFTS_REPORTED)
+  return rangeEnd == null ? [] : completedShifts(shifts, clampEnd(Math.min(rangeEnd, now)), SHIFTS_REPORTED)
 }
 
 /**
@@ -64,10 +64,10 @@ export function useShiftReports(
   findings: readonly RcaFinding[],
   /** Bumped to refetch. */
   refreshKey: number,
-  line: LineConfig,
+  line: LineModel,
   loaded?: LoadedRange,
 ): ShiftReports {
-  const { labDevice, processDevice } = line
+  const lineKey = `${line.plant.id}/${line.id}`
 
   // Primitive bounds, so a new array of the same shifts does not refetch.
   const spanStart = shifts.length ? Math.min(...shifts.map((s) => s.start)) : null
@@ -97,9 +97,9 @@ export function useShiftReports(
     const { signal } = controller
     setLoading(true)
     Promise.all([
-      fetchRange(labDevice, spanStart, spanEnd, signal),
+      fetchDevicesRange(line, line.labDevices, spanStart, spanEnd, signal),
       // Process history only supports the recommendations, so its failure is not fatal here.
-      fetchRangeChunked(processDevice, spanStart, spanEnd, { signal }).catch((err: unknown) => {
+      fetchDevicesRangeChunked(line, line.processDevices, spanStart, spanEnd, { signal }).catch((err: unknown) => {
         if (signal.aborted) throw err
         return null
       }),
@@ -124,13 +124,14 @@ export function useShiftReports(
         if (!signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [reuse, spanStart, spanEnd, refreshKey, labDevice, processDevice])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `line` is identified by lineKey
+  }, [reuse, spanStart, spanEnd, refreshKey, lineKey])
 
   const lab = reuse ? loaded.labRows : labRows
   const proc = reuse ? loaded.processRows : processRows
   const reports = useMemo(
-    () => shifts.map((shift) => buildShiftReport({ shift, labRows: lab, processRows: proc, findings })),
-    [shifts, lab, proc, findings],
+    () => shifts.map((shift) => buildShiftReport({ shift, labRows: lab, processRows: proc, findings, line })),
+    [shifts, lab, proc, findings, line],
   )
 
   if (reuse) {

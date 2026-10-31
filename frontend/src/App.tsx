@@ -29,11 +29,12 @@ import { useTimeline48 } from './hooks/useTimeline48'
 import { useEventContext } from './hooks/useEventContext'
 import { PROCESS_MAX_SPAN_MS } from './hooks/useDashboardData'
 import { contextWindow } from './lib/eventTrends'
-import { clampEnd } from './config/dataWindow'
+import { applyDataEnd, clampEnd } from './config/dataWindow'
 import { MINUTE_MS } from './lib/time'
 import { useNow } from './hooks/useNow'
 import { loadLineSelection, resolveLine, saveLineSelection } from './config/plants'
 import type { LineSelection } from './config/plants'
+import { LineProvider } from './config/LineContext'
 import type { RcaFinding } from './services/rcaService'
 import { formatFull } from './lib/time'
 
@@ -54,7 +55,10 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     const { plant, line } = resolveLine(loadLineSelection())
     return { plantId: plant.id, lineId: line.id }
   })
-  const { line } = resolveLine(lineSel)
+  const { plant, line } = resolveLine(lineSel)
+  // The plant's data cut-off is in force before any load below starts: applied during render, ahead
+  // of the hooks' effects and state initialisers. Idempotent, so re-renders are harmless.
+  applyDataEnd(plant.dataEnd)
 
   // The dashboard opens on the last 7 days (plant request, 2026-10-28).
   const [selection, setSelectionState] = useState<TimeSelection>({ kind: 'preset', rangeId: '7d' })
@@ -166,18 +170,21 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   // Nothing can be drawn until the window is known (a preset needs the newest sample).
   if (d.windowStart == null) {
     return (
-      <div className="app">
-        {header(true)}
-        <main className="app__main">
-          <LoadingState message="Loading plant data…" />
-        </main>
-      </div>
+      <LineProvider line={line}>
+        <div className="app">
+          {header(true)}
+          <main className="app__main">
+            <LoadingState message="Loading plant data…" />
+          </main>
+        </div>
+      </LineProvider>
     )
   }
 
   const loadingAny = d.labLoading || d.rcaLoading || d.processLoading
 
   return (
+    <LineProvider line={line}>
     <div className="app">
       {header(loadingAny)}
 
@@ -227,7 +234,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
 
         {tab === 'executive' ? (
           <div role="tabpanel" id="panel-executive" aria-labelledby="tab-executive">
-            <ExecutiveView d={d} now={now} />
+            <ExecutiveView d={d} now={now} targets={zoneTargets} />
           </div>
         ) : tab === 'trend' ? (
           <div role="tabpanel" id="panel-trend" aria-labelledby="tab-trend">
@@ -278,12 +285,13 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         <footer className="app__footer">
           <p>
             Predicted C3S is a model output; actual C3S is the laboratory result. Root cause
-            findings come from the platform&rsquo;s C3S RCA insight. Every value is read live
+            findings come from the platform&rsquo;s C3S RCA insight ({line.insightId}). Every value is read live
             from the platform; none is sample or demonstration data.
           </p>
         </footer>
       </main>
     </div>
+    </LineProvider>
   )
 }
 

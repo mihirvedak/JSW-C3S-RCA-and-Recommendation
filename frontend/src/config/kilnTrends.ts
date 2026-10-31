@@ -1,19 +1,18 @@
 /**
- * The kiln-operation trends every RCA event is read against, in the order operators asked
- * for them: burning zone, secondary air, kiln filling degree, tertiary air, kiln inlet O2, the
- * two coal rates, kiln speed and cooler air. (Precalciner outlet temperature is not shown, at
- * the plant's request: `TREND_EXCLUDED_TAGS`.)
+ * The kiln-operation trends every RCA event is read against, in the order operators asked for
+ * them: burning zone, secondary air, kiln filling degree, tertiary air, kiln inlet O2, the two
+ * coal rates, kiln speed and cooler air. Each is a role; a line that has not mapped the role does
+ * not get the card, and says nothing in its place.
  *
- * Most are single ADANI_RAW tags. Two have no tag and are computed from the tags they are
- * made of, and say so on screen:
- *   - kiln filling degree (%): the plant's formula, 22.56 × (feed / 448) × (3.31 / rpm), with its
- *     norm 14–16 % and flag above 18 % (see FILL below);
+ * Two trends have no tag and are computed from the tags they are made of, and say so on screen:
+ *   - kiln filling degree (%): the plant's formula, anchor % × (feed / anchor feed) × (anchor rpm / rpm),
+ *     with the plant's norm band and flag level (`LineSpec.kilnFilling`); needs kiln feed and speed;
  *   - cooler fan flow: the sum of the cooler fan flows, at instants where every fan reports.
  *     A fan the tag map marks "drop" is left out.
  */
 
-import { RAW_TAGS } from './tagMaps'
-import type { SignalQuality } from './tagMaps'
+import type { KilnFillingSpec, Role, SignalQuality } from './clients/types'
+import type { LineModel } from './lineModel'
 import type { Point, TimestampRow } from '../lib/series'
 import { extractSeries } from '../lib/series'
 
@@ -21,7 +20,7 @@ export interface TrendDef {
   key: string
   label: string
   unit: string | null
-  /** ADANI_RAW tags it is read from. */
+  /** Sensor keys it is read from. */
   tags: readonly string[]
   /** Worst grading the tag map gives any of those tags. */
   quality: SignalQuality | null
@@ -36,123 +35,139 @@ export interface TrendDef {
 
 const QUALITY_RANK: Record<SignalQuality, number> = { usable: 0, flag: 1, unreliable: 2, drop: 3 }
 
-function worst(tags: readonly string[]): SignalQuality | null {
+function worst(line: LineModel, tags: readonly string[]): SignalQuality | null {
   let out: SignalQuality | null = null
   for (const t of tags) {
-    const q = RAW_TAGS[t]?.quality
+    const q = line.sensorByKey(t)?.quality
     if (q && (out == null || QUALITY_RANK[q] > QUALITY_RANK[out])) out = q
   }
   return out
 }
 
-/** A trend for a single ADANI_RAW tag, named and graded by the tag map. */
-export function tagTrend(sensorId: string): TrendDef {
-  const t = RAW_TAGS[sensorId]
+/** A trend for a single sensor key, named and graded by the line. */
+export function tagTrend(line: LineModel, key: string): TrendDef {
+  const def = line.describe(key)
   return {
-    key: sensorId,
-    label: t?.label ?? sensorId,
-    unit: t?.unit ?? null,
-    tags: [sensorId],
-    quality: t?.quality ?? null,
+    key,
+    label: def.label,
+    unit: def.unit,
+    tags: [key],
+    quality: def.quality,
     note: null,
-    series: (rows) => extractSeries(rows, sensorId),
+    series: (rows) => extractSeries(rows, key),
   }
 }
 
-const KILN_FEED = 'D74'
-const KILN_RPM = 'D73'
-/*
- * Kiln filling degree, as the plant specified it (2026-10-28):
- *   filling % = 22.56 × (feed / 448) × (3.31 / rpm)
- * anchored on the Adani worked example (448 t/h at 3.31 rpm = 22.56 %). It follows filling degree =
- * productivity / (diameter³ × speed), so it rises with feed and falls with kiln speed. Feed is
- * MT.431-FM1.F4:PV (ADANI_RAW D74), speed MT.461-2C2.S1:PV (D73).
- */
-export const FILL_ANCHOR = { percent: 22.56, feed: 448, rpm: 3.31 }
-/** Rows with the kiln turning slower than this are a stopped kiln, and are skipped. */
-export const FILL_MIN_RPM = 0.5
-/** Normal operating band, and the level above which a reading is flagged. */
-export const FILL_NORM = { lo: 14, hi: 16 }
-export const FILL_FLAG = 18
-/** The filling degree the "speed that brings it to" figure aims at. */
-export const FILL_SPEED_TARGET = 19
+/* ------------------------------ kiln filling degree ------------------------------ */
 
 /** Filling degree in %, or null when the kiln is stopped or a reading is missing. */
-export function kilnFilling(feed: number | null | undefined, rpm: number | null | undefined): number | null {
-  if (feed == null || rpm == null || !Number.isFinite(feed) || !Number.isFinite(rpm) || rpm < FILL_MIN_RPM) return null
-  return FILL_ANCHOR.percent * (feed / FILL_ANCHOR.feed) * (FILL_ANCHOR.rpm / rpm)
+export function kilnFilling(
+  feed: number | null | undefined,
+  rpm: number | null | undefined,
+  spec: KilnFillingSpec,
+): number | null {
+  if (feed == null || rpm == null || !Number.isFinite(feed) || !Number.isFinite(rpm) || rpm < spec.minRpm) return null
+  return spec.anchor.percent * (feed / spec.anchor.feed) * (spec.anchor.rpm / rpm)
 }
 
 /** Kiln speed that brings the filling degree to `target` %: rpm × filling / target. */
-export const rpmForFilling = (rpm: number, filling: number, target = FILL_SPEED_TARGET) => (rpm * filling) / target
+export const rpmForFilling = (rpm: number, filling: number, target: number) => (rpm * filling) / target
 
 /** Median and the share of readings above the flag level. */
-export function fillingStats(points: readonly Point[]): { n: number; median: number | null; abovePct: number | null } {
+export function fillingStats(points: readonly Point[], flagAbove: number): { n: number; median: number | null; abovePct: number | null } {
   const v = points.map((p) => p.v).sort((a, b) => a - b)
   if (!v.length) return { n: 0, median: null, abovePct: null }
   const m = v.length >> 1
   const median = v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2
-  return { n: v.length, median, abovePct: (v.filter((x) => x > FILL_FLAG).length / v.length) * 100 }
+  return { n: v.length, median, abovePct: (v.filter((x) => x > flagAbove).length / v.length) * 100 }
 }
 
-const FILL: TrendDef = {
-  key: 'kiln-fill',
-  label: 'Kiln filling degree',
-  unit: '%',
-  tags: [KILN_FEED, KILN_RPM],
-  quality: worst([KILN_FEED, KILN_RPM]),
-  note: `22.56 × (feed / 448) × (3.31 / rpm). Norm ${FILL_NORM.lo}–${FILL_NORM.hi} %, flagged above ${FILL_FLAG} %; stopped kiln (rpm < ${FILL_MIN_RPM}) skipped.`,
-  band: { lo: FILL_NORM.lo, hi: FILL_NORM.hi, label: `Norm ${FILL_NORM.lo}–${FILL_NORM.hi} %` },
-  flagAbove: FILL_FLAG,
-  series: (rows) =>
-    rows.flatMap((r) => {
-      const v = kilnFilling(r.values[KILN_FEED], r.values[KILN_RPM])
-      return v == null ? [] : [{ t: r.t, v }]
-    }),
+export const FILL_KEY = 'kiln-fill'
+export const COOLER_FLOW_KEY = 'cooler-flow'
+
+function fillTrend(line: LineModel): TrendDef | null {
+  const spec = line.kilnFilling
+  const feed = line.role('kilnFeed')
+  const rpm = line.role('kilnRpm')
+  if (!spec || !feed || !rpm) return null
+  const { anchor, norm, flagAbove, minRpm } = spec
+  return {
+    key: FILL_KEY,
+    label: 'Kiln filling degree',
+    unit: '%',
+    tags: [feed, rpm],
+    quality: worst(line, [feed, rpm]),
+    note: `${anchor.percent} × (feed / ${anchor.feed}) × (${anchor.rpm} / rpm). Norm ${norm.lo}–${norm.hi} %, flagged above ${flagAbove} %; stopped kiln (rpm < ${minRpm}) skipped.`,
+    band: { lo: norm.lo, hi: norm.hi, label: `Norm ${norm.lo}–${norm.hi} %` },
+    flagAbove,
+    series: (rows) =>
+      rows.flatMap((r) => {
+        const v = kilnFilling(r.values[feed], r.values[rpm], spec)
+        return v == null ? [] : [{ t: r.t, v }]
+      }),
+  }
 }
 
-const FAN_FLOW = /^Cooler Fan (\d+) Flow$/
-const allFans = Object.entries(RAW_TAGS)
-  .filter(([, t]) => FAN_FLOW.test(t.label))
-  .sort(([, a], [, b]) => Number(FAN_FLOW.exec(a.label)![1]) - Number(FAN_FLOW.exec(b.label)![1]))
-const fans = allFans.filter(([, t]) => t.quality !== 'drop').map(([id]) => id)
-const droppedFans = allFans.filter(([, t]) => t.quality === 'drop').map(([, t]) => FAN_FLOW.exec(t.label)![1])
-
-const COOLER_FLOW: TrendDef = {
-  key: 'cooler-flow',
-  label: 'Cooler fan flow (total)',
-  unit: 'm3/sec',
-  tags: fans,
-  quality: worst(fans),
-  note:
-    `Sum of ${fans.length} cooler fan flows, at instants where all of them report` +
-    (droppedFans.length ? `; fan ${droppedFans.join(', ')} is left out (marked "drop" in the tag map).` : '.'),
-  series: (rows) =>
-    rows.flatMap((r) => {
-      let sum = 0
-      for (const id of fans) {
-        const v = r.values[id]
-        if (v == null) return []
-        sum += v
-      }
-      return [{ t: r.t, v: sum }]
-    }),
+function coolerFlowTrend(line: LineModel): TrendDef | null {
+  const all = line.coolerFanFlows
+  if (all.length === 0) return null
+  const fans = all.filter((k) => line.sensorByKey(k)?.quality !== 'drop')
+  const dropped = all.filter((k) => line.sensorByKey(k)?.quality === 'drop').map((k) => line.label(k))
+  if (fans.length === 0) return null
+  return {
+    key: COOLER_FLOW_KEY,
+    label: 'Cooler fan flow (total)',
+    unit: line.unit(fans[0]),
+    tags: fans,
+    quality: worst(line, fans),
+    note:
+      `Sum of ${fans.length} cooler fan flows, at instants where all of them report` +
+      (dropped.length ? `; ${dropped.join(', ')} left out (marked "drop" in the tag map).` : '.'),
+    series: (rows) =>
+      rows.flatMap((r) => {
+        let sum = 0
+        for (const id of fans) {
+          const v = r.values[id]
+          if (v == null) return []
+          sum += v
+        }
+        return [{ t: r.t, v: sum }]
+      }),
+  }
 }
 
-export const KILN_OPERATION_TRENDS: readonly TrendDef[] = [
-  tagTrend('D0'), // Burning Zone Temp (BZT)
-  tagTrend('D117'), // Secondary Air Temp (SAT)
-  FILL,
-  tagTrend('D122'), // TAD Temperature
-  tagTrend('D71'), // Kiln Inlet O2
-  tagTrend('D75'), // PC Coal
-  tagTrend('D66'), // Kiln Coal
-  tagTrend(KILN_RPM), // Kiln RPM
-  COOLER_FLOW,
+/** The order operators asked for. `fill` and `cooler` are the two computed trends. */
+const ORDER: ReadonlyArray<Role | 'fill' | 'cooler'> = [
+  'burningZoneTemp',
+  'secondaryAirTemp',
+  'fill',
+  'tertiaryAirTemp',
+  'kilnInletO2',
+  'pcCoal',
+  'kilnCoal',
+  'kilnRpm',
+  'cooler',
 ]
 
-/**
- * Tags never charted on Trend Analysis, even when an RCA names them. PC Outlet Temp (D77) is left
- * out at the plant's request (2026-10-28).
- */
-export const TREND_EXCLUDED_TAGS: ReadonlySet<string> = new Set(['D77'])
+const cache = new WeakMap<LineModel, TrendDef[]>()
+
+/** The kiln-operation trends this line can show, in operators' order. */
+export function kilnOperationTrends(line: LineModel): TrendDef[] {
+  const hit = cache.get(line)
+  if (hit) return hit
+  const out: TrendDef[] = []
+  for (const item of ORDER) {
+    if (item === 'fill') {
+      const t = fillTrend(line)
+      if (t) out.push(t)
+    } else if (item === 'cooler') {
+      const t = coolerFlowTrend(line)
+      if (t) out.push(t)
+    } else {
+      const key = line.role(item)
+      if (key) out.push(tagTrend(line, key))
+    }
+  }
+  cache.set(line, out)
+  return out
+}

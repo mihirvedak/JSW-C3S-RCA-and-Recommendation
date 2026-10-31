@@ -1,20 +1,17 @@
 /**
- * Process monitoring — ADANI_RAW.
+ * Process monitoring — the line's process devices.
  *
- * Signals are listed under the equipment section the process tag map gives them
- * (Preheater, Calciner, Kiln, Cooler, Other). Selecting one plots its real trend over the
- * selected window, with the x axis fixed to that window so it lines up with the C3S trend.
+ * Signals are listed under the equipment section the client spec gives them (Preheater,
+ * Calciner, Kiln, Cooler, …). Tags the devices report that the spec does not name are listed
+ * too, under "Unnamed signals", by their bare id and marked as such: a new plant can see what
+ * its devices carry before every tag has been named. Selecting a signal plots its real trend
+ * over the selected window, with the x axis fixed to that window so it lines up with the C3S
+ * trend.
  */
 
 import { useMemo, useState } from 'react'
-import {
-  PROCESS_DEVICE,
-  PROCESS_GROUP_LABELS,
-  PROCESS_GROUP_ORDER,
-  PROCESS_SENSORS,
-  getSensor,
-} from '../config/deviceMappings'
-import type { ProcessSensorDef } from '../config/deviceMappings'
+import { useLine } from '../config/LineContext'
+import type { SensorDef } from '../config/lineModel'
 import type { LastReading } from '../services/deviceDataService'
 import { extractSeries } from '../lib/series'
 import type { Point, TimestampRow } from '../lib/series'
@@ -25,18 +22,16 @@ const W = 720
 const H = 150
 const PAD = { top: 12, right: 12, bottom: 22, left: 48 }
 
+const UNNAMED = { id: '__unnamed', label: 'Unnamed signals' }
+
 /** Natural order, so "Cooler Fan 2" sorts before "Cooler Fan 10". */
-const byLabel = (a: ProcessSensorDef, b: ProcessSensorDef) =>
+const byLabel = (a: SensorDef, b: SensorDef) =>
   a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' })
 
-/** Sensors under their section heading, in the tag map's section order. */
-function groupSensors(
-  sensors: readonly ProcessSensorDef[],
-): Array<{ group: ProcessSensorDef['group']; items: ProcessSensorDef[] }> {
-  return PROCESS_GROUP_ORDER.map((group) => ({
-    group,
-    items: sensors.filter((s) => s.group === group).sort(byLabel),
-  })).filter((g) => g.items.length > 0)
+interface Section {
+  id: string
+  label: string
+  items: SensorDef[]
 }
 
 function Sparkline({
@@ -124,36 +119,58 @@ export function ProcessMonitor({
   windowStart: number | null
   windowEnd: number | null
 }) {
-  const reporting = useMemo(
-    () => PROCESS_SENSORS.filter((s) => latest.get(s.sensorId)?.value != null),
-    [latest],
-  )
+  const line = useLine()
+  const listed = useMemo(() => line.groups('process'), [line])
+  const listedCount = useMemo(() => listed.reduce((n, g) => n + g.sensors.length, 0), [listed])
+
+  // Every key that reports in the window: the listed sensors under their sections, the rest
+  // (tags the spec does not name) under one section of their own.
+  const sections = useMemo<Section[]>(() => {
+    const reporting = (s: SensorDef) => latest.get(s.key)?.value != null
+    const out: Section[] = listed
+      .map((g) => ({ id: g.id, label: g.label, items: g.sensors.filter(reporting).sort(byLabel) }))
+      .filter((g) => g.items.length > 0)
+    const unnamed: SensorDef[] = []
+    for (const [key, r] of latest) {
+      if (r.value == null || line.sensorByKey(key)) continue
+      const def = line.describe(key)
+      if (def.kind === 'process') unnamed.push(def)
+    }
+    if (unnamed.length) out.push({ ...UNNAMED, items: unnamed.sort(byLabel) })
+    return out
+  }, [listed, latest, line])
+
+  const reportingCount = sections.reduce((n, g) => n + g.items.length, 0)
 
   const [picked, setPicked] = useState<string | null>(null)
   const [query, setQuery] = useState('')
 
   // A pick only counts while that sensor still reports in the selected window; otherwise the
   // first signal in the list is shown.
-  const firstListed = groupSensors(reporting)[0]?.items[0]?.sensorId ?? 'D0'
+  const firstListed = sections[0]?.items[0]?.key ?? null
   const selected =
-    picked != null && reporting.some((s) => s.sensorId === picked) ? picked : firstListed
-  const setSelected = setPicked
+    picked != null && sections.some((g) => g.items.some((s) => s.key === picked)) ? picked : firstListed
 
-  // Searchable by label, section or sensor id, so an engineer who knows the tag can still find it.
-  const filtered = reporting.filter((s) => {
-    if (!query.trim()) return true
-    const q = query.trim().toLowerCase()
-    return (
-      s.sensorId.toLowerCase().includes(q) ||
-      s.label.toLowerCase().includes(q) ||
-      PROCESS_GROUP_LABELS[s.group].toLowerCase().includes(q)
-    )
-  })
-  const grouped = groupSensors(filtered)
+  // Searchable by label, section, device or sensor id, so an engineer who knows the tag can still find it.
+  const q = query.trim().toLowerCase()
+  const filtered = sections
+    .map((g) => ({
+      ...g,
+      items: q
+        ? g.items.filter(
+            (s) =>
+              s.key.toLowerCase().includes(q) ||
+              s.label.toLowerCase().includes(q) ||
+              g.label.toLowerCase().includes(q) ||
+              line.deviceLabel(s.devID).toLowerCase().includes(q),
+          )
+        : g.items,
+    }))
+    .filter((g) => g.items.length > 0)
 
-  const series = useMemo(() => extractSeries(rows, selected), [rows, selected])
-  const def = getSensor(PROCESS_DEVICE, selected)
-  const reading = latest.get(selected)
+  const series = useMemo(() => (selected ? extractSeries(rows, selected) : []), [rows, selected])
+  const def = selected ? line.describe(selected) : null
+  const reading = selected ? latest.get(selected) : undefined
 
   return (
     <div className="process">
@@ -167,30 +184,33 @@ export function ProcessMonitor({
           aria-label="Filter process sensors"
         />
         <p className="process__count">
-          {reporting.length} of {PROCESS_SENSORS.length} sensors reporting in the selected range
+          {reportingCount} sensor{reportingCount === 1 ? '' : 's'} reporting in the selected range
+          {listedCount ? ` · ${listedCount} named in the line's configuration` : ''}
         </p>
         <ul className="process__items">
-          {grouped.length === 0 ? (
+          {filtered.length === 0 ? (
             <li className="process__none">No sensors match.</li>
           ) : null}
-          {grouped.map(({ group, items }) => (
-            <li key={group} className="process__section">
+          {filtered.map((g) => (
+            <li key={g.id} className="process__section">
               <h4 className="process__group">
-                {PROCESS_GROUP_LABELS[group]}
-                <span className="process__group-count">{items.length}</span>
+                {g.label}
+                <span className="process__group-count">{g.items.length}</span>
               </h4>
               <ul>
-                {items.map((s) => {
-                  const r = latest.get(s.sensorId)
+                {g.items.map((s) => {
+                  const r = latest.get(s.key)
                   return (
-                    <li key={s.sensorId}>
+                    <li key={s.key}>
                       <button
                         type="button"
-                        className={`process__item ${selected === s.sensorId ? 'is-active' : ''}`}
-                        onClick={() => setSelected(s.sensorId)}
-                        title={`${PROCESS_DEVICE}:${s.sensorId}`}
+                        className={`process__item ${selected === s.key ? 'is-active' : ''}`}
+                        onClick={() => setPicked(s.key)}
+                        title={s.key}
                       >
-                        <span className="process__item-name">{s.label}</span>
+                        <span className="process__item-name">
+                          {s.name == null ? `${line.deviceLabel(s.devID)} · ${s.label}` : s.label}
+                        </span>
                         <span className="process__item-val">
                           {r?.value == null ? '—' : r.value.toFixed(2)}
                           {s.unit ? <span className="process__item-unit"> {s.unit}</span> : null}
@@ -206,37 +226,46 @@ export function ProcessMonitor({
       </div>
 
       <div className="process__detail">
-        <header className="process__detail-head">
-          <div>
-            <h3>
-              {def?.label ?? selected}
-              {def?.name == null ? <UnverifiedName /> : null}
-            </h3>
-            {def?.unit ? <span className="process__detail-ref">{def.unit}</span> : null}
-          </div>
-          <div className="process__detail-value">
-            {reading?.value == null ? (
-              <NoData />
-            ) : (
-              <>
-                <strong>{reading.value.toFixed(3)}</strong>
-                {def?.unit ? <span className="process__unit">{def.unit}</span> : null}
-              </>
-            )}
-            {reading?.time != null ? (
-              <span className="process__detail-time" title={formatFull(reading.time)}>
-                {formatAge(reading.time, now)}
-              </span>
-            ) : null}
-          </div>
-        </header>
+        {def == null ? (
+          <p className="trend__empty">No process sensor reported in the selected range.</p>
+        ) : (
+          <>
+            <header className="process__detail-head">
+              <div>
+                <h3>
+                  {def.label}
+                  {def.name == null ? <UnverifiedName /> : null}
+                </h3>
+                <span className="process__detail-ref">
+                  {def.key}
+                  {def.unit ? ` · ${def.unit}` : ''}
+                </span>
+              </div>
+              <div className="process__detail-value">
+                {reading?.value == null ? (
+                  <NoData />
+                ) : (
+                  <>
+                    <strong>{reading.value.toFixed(3)}</strong>
+                    {def.unit ? <span className="process__unit">{def.unit}</span> : null}
+                  </>
+                )}
+                {reading?.time != null ? (
+                  <span className="process__detail-time" title={formatFull(reading.time)}>
+                    {formatAge(reading.time, now)}
+                  </span>
+                ) : null}
+              </div>
+            </header>
 
-        <Sparkline
-          points={series}
-          markerMs={eventMarkerMs}
-          windowStart={windowStart}
-          windowEnd={windowEnd}
-        />
+            <Sparkline
+              points={series}
+              markerMs={eventMarkerMs}
+              windowStart={windowStart}
+              windowEnd={windowEnd}
+            />
+          </>
+        )}
       </div>
     </div>
   )

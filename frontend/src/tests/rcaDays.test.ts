@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SHIFTS } from '../config/shifts'
+import { DEFAULT_SHIFTS as SHIFTS } from '../config/shifts'
 import { formatDay, rcaDays } from '../lib/rcaDays'
 import { shiftAt, shiftsOnDay } from '../lib/shifts'
 import { MINUTE_MS } from '../lib/time'

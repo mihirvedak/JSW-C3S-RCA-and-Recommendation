@@ -1,6 +1,6 @@
 /**
- * Sensor names for ADANI_LAB and ADANI_RAW, as supplied in the two tag-map files
- * (`adani_lab_tag_map.json`, `adani_raw_tag_map.json`).
+ * Adani: sensor names for ADANI_LAB and ADANI_RAW, as supplied in the two tag-map files
+ * (`adani_lab_tag_map.json`, `adani_raw_tag_map.json`). Consumed only by `adani.ts`.
  *
  * This is the mapping authority for names, units and — on the process device — the
  * equipment section each tag belongs to. The platform's own sensor metadata is not
@@ -11,6 +11,8 @@
  * half-width katakana character ("ｰC") in the source export and is written "°C" here, and
  * one parameter's spelling ("Clinlker") is corrected. Nothing else is altered.
  */
+
+import type { SignalQuality } from './types'
 
 /* ------------------------------------------------------------------ *
  * ADANI_LAB — one contiguous D-block per stream (D0–D51)
@@ -132,7 +134,6 @@ export const LAB_TAGS: Readonly<Record<string, LabTag>> = buildLabTags()
 export type ProcessSection = 'preheater' | 'calciner' | 'kiln' | 'cooler' | 'other'
 
 /** The tag map's own assessment of each signal. Carried as data; not used to hide anything. */
-export type SignalQuality = 'usable' | 'flag' | 'unreliable' | 'drop'
 
 export interface RawTag {
   /** Parameter name as supplied, e.g. "Cooler Fan 9 Amps". */

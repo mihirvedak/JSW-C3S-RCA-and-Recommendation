@@ -1,51 +1,26 @@
 /**
  * Plants and production lines.
  *
- * Every data load is scoped to the selected line: its laboratory device, its process device
- * and its RCA insight. To add a line, add an entry with those three IDs; to add a plant, add a
- * plant with its lines. Nothing else changes: the selectors, the fetches and the caches all
- * read from here.
+ * Every data load is scoped to the selected line: its devices, its roles and its RCA insight,
+ * compiled once into a `LineModel`. To add a plant, write its spec in `config/clients/` and list
+ * it here; nothing else changes. The first plant listed is the default for a new visitor.
  *
- * Sensor names and units come from the tag maps in `tagMaps.ts`, which describe the D-tag
- * layout of the ADANI_LAB / ADANI_RAW devices. A line whose devices use a different layout
- * also needs its own tag map.
- *
- * Only Line 1 is configured: it is the only line whose devices and insight this account can
- * read. Its IDs are verified (see iosense.md). No other line is listed until its device and
- * insight IDs are known, so the selector never offers a line that would show no data.
+ * A line whose spec is inconsistent (a role naming a sensor that is not listed, or a required
+ * role missing) fails here, at start-up, rather than somewhere in a chart.
  */
 
-import { LAB_DEVICE, PROCESS_DEVICE } from './deviceMappings'
+import { ADANI } from './clients/adani'
+import { JSW } from './clients/jsw'
+import type { PlantSpec } from './clients/types'
+import { buildLine } from './lineModel'
+import type { LineModel } from './lineModel'
 
-export interface LineConfig {
-  id: string
-  name: string
-  labDevice: string
-  processDevice: string
-  insightId: string
+export const PLANTS: readonly PlantSpec[] = [JSW, ADANI]
+
+const MODELS = new Map<string, LineModel>()
+for (const plant of PLANTS) {
+  for (const line of plant.lines) MODELS.set(`${plant.id}/${line.id}`, buildLine(plant, line))
 }
-
-export interface PlantConfig {
-  id: string
-  name: string
-  lines: readonly LineConfig[]
-}
-
-export const PLANTS: readonly PlantConfig[] = [
-  {
-    id: 'adani',
-    name: 'Adani Cement',
-    lines: [
-      {
-        id: 'line1',
-        name: 'Line 1',
-        labDevice: LAB_DEVICE,
-        processDevice: PROCESS_DEVICE,
-        insightId: 'INS_df1b3c1a11de',
-      },
-    ],
-  },
-]
 
 export interface LineSelection {
   plantId: string
@@ -53,11 +28,14 @@ export interface LineSelection {
 }
 
 /** The plant and line a selection names, falling back to the first configured ones. */
-export function resolveLine(sel: LineSelection | null): { plant: PlantConfig; line: LineConfig } {
+export function resolveLine(sel: LineSelection | null): { plant: PlantSpec; line: LineModel } {
   const plant = PLANTS.find((p) => p.id === sel?.plantId) ?? PLANTS[0]
-  const line = plant.lines.find((l) => l.id === sel?.lineId) ?? plant.lines[0]
-  return { plant, line }
+  const spec = plant.lines.find((l) => l.id === sel?.lineId) ?? plant.lines[0]
+  return { plant, line: MODELS.get(`${plant.id}/${spec.id}`)! }
 }
+
+/** Every configured line, for tests and tooling. */
+export const ALL_LINES: readonly LineModel[] = [...MODELS.values()]
 
 const STORAGE_KEY = 'c3s.line'
 

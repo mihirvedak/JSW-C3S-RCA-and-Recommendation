@@ -5,11 +5,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchLatest,
-  fetchLatestTimestamp,
   fetchRange,
   fetchRangeChunked,
 } from '../services/deviceDataService'
+import { fetchDevicesRange, fetchLatestByKey, fetchNewestC3S, mergeRows, qualifyRows } from '../services/lineDataService'
 import { ApiError, AuthError } from '../services/apiClient'
+import { applyDataEnd } from '../config/dataWindow'
+import { ADANI, JSW, lab } from './lines'
 
 function mockFetch(body: unknown, status = 200) {
   const spy = vi.fn(
@@ -144,8 +146,8 @@ describe('fetchRange', () => {
   })
 })
 
-describe('fetchLatestTimestamp', () => {
-  it('returns the newest timestamp across the reference sensors', async () => {
+describe('fetchNewestC3S', () => {
+  it('returns the newest timestamp across the line\'s predicted and actual C3S', async () => {
     mockFetch({
       success: true,
       data: {
@@ -157,14 +159,25 @@ describe('fetchLatestTimestamp', () => {
       },
     })
 
-    expect(await fetchLatestTimestamp('ADANI_LAB', ['D55', 'D58'])).toBe(
-      Date.parse('2026-08-28T06:45:00.000Z'),
-    )
+    expect(await fetchNewestC3S(ADANI)).toBe(Date.parse('2026-08-28T06:45:00.000Z'))
   })
 
   it('is null when nothing has reported', async () => {
-    mockFetch({ success: true, data: { devID: 'ADANI_LAB', data: { D55: [] } } })
-    expect(await fetchLatestTimestamp('ADANI_LAB', ['D55'])).toBeNull()
+    mockFetch({ success: true, data: { devID: 'ADANI_LAB', data: { D55: [], D58: [] } } })
+    expect(await fetchNewestC3S(ADANI)).toBeNull()
+  })
+
+  it('probes one device per C3S series when they live on different devices (JSW)', async () => {
+    const spy = mockFetch({ success: true, data: { devID: 'x', data: {} } })
+    await fetchNewestC3S(JSW)
+    const bodies = spy.mock.calls.map((c) => JSON.parse(String(c[1]?.body)))
+    expect(bodies.map((b) => [b.devID, b.sensors])).toEqual(
+      expect.arrayContaining([
+        ['JSW_C3S', ['D7']],
+        ['FLSCLINKER', ['D18']],
+      ]),
+    )
+    expect(bodies).toHaveLength(2)
   })
 })
 
@@ -277,6 +290,7 @@ describe('fetchRangeChunked', () => {
   it('keeps the newest 7 days before the data cut-off when a long range runs past it', async () => {
     const { calls } = hourlyDevice()
     const CUTOFF = Date.parse('2026-08-28T03:00:00+05:30')
+    applyDataEnd('2026-08-28T03:00') // Adani's cut-off, as App applies it when that plant is selected
     // 1 Aug to 28 Oct: the newest 7 days with data end at the cut-off, not on 28 Oct.
     const result = await fetchRangeChunked('ADANI_RAW', Date.parse('2026-08-01T00:00:00Z'), Date.parse('2026-10-28T00:00:00Z'), {
       maxSpanMs: 7 * DAY,
@@ -285,6 +299,7 @@ describe('fetchRangeChunked', () => {
     expect(result.fetchedStart).toBe(CUTOFF - 7 * DAY)
     expect(Math.max(...calls.map((c) => c[1]))).toBe(CUTOFF)
     expect(result.rows.length).toBeGreaterThan(160)
+    applyDataEnd(null)
   })
 
   it('loads every week of a long laboratory range when it is not capped', async () => {
@@ -396,19 +411,42 @@ describe('impossible readings', () => {
         { time: T, D55: 41.8 },
       ],
     })
-    const rows = await fetchRange('ADANI_LAB', Date.parse(T) - 1, Date.parse(T) + 3_600_000)
-    expect(rows.map((r) => r.values.D55)).toEqual([41.8, undefined, 50])
+    const rows = await fetchDevicesRange(ADANI, ['ADANI_LAB'], Date.parse(T) - 1, Date.parse(T) + 3_600_000)
+    expect(rows.map((r) => r.values[lab('D55')])).toEqual([41.8, undefined, 50])
     // The rest of that row is kept.
-    expect(rows[1].values).toEqual({ D52: 2.9 })
+    expect(rows[1].values).toEqual({ [lab('D52')]: 2.9 })
   })
 
   it('treats it as no reading in the newest values too', async () => {
     mockFetch({ success: true, data: { devID: 'ADANI_LAB', data: { D55: { time: T, value: 77 } } } })
-    expect((await fetchLatest('ADANI_LAB', ['D55'])).get('D55')).toEqual({ sensorId: 'D55', value: null, time: Date.parse(T) })
+    expect((await fetchLatestByKey(ADANI, [lab('D55')])).get(lab('D55'))).toEqual({ sensorId: lab('D55'), value: null, time: Date.parse(T) })
   })
 
   it('leaves the process device alone: its D55 is a different tag', async () => {
-    mockFetch({ success: true, data: [{ time: T, D55: 812 }] })
-    expect((await fetchRange('ADANI_RAW', Date.parse(T) - 1, Date.parse(T) + 1))[0].values.D55).toBe(812)
+    const rows = qualifyRows(ADANI, 'ADANI_RAW', [{ t: Date.parse(T), values: { D55: 812 } }])
+    expect(rows[0].values['ADANI_RAW:D55']).toBe(812)
+  })
+})
+
+describe('rows of several devices', () => {
+  it('qualifies every key by device and merges shared timestamps', () => {
+    const t = Date.parse('2026-10-30T06:00:00Z')
+    const a = qualifyRows(JSW, 'FLSCLINKER', [{ t, values: { D18: 61.2, D24: 1.1 } }])
+    const b = qualifyRows(JSW, 'JSWBMBCLRMTR_KC', [{ t, values: { D18: 5080 } }, { t: t + 1, values: { D18: 5090 } }])
+    const merged = mergeRows([a, b])
+    expect(merged).toEqual([
+      { t, values: { 'FLSCLINKER:D18': 61.2, 'FLSCLINKER:D24': 1.1, 'JSWBMBCLRMTR_KC:D18': 5080 } },
+      { t: t + 1, values: { 'JSWBMBCLRMTR_KC:D18': 5090 } },
+    ])
+  })
+
+  it('fetches each device of a line once per window', async () => {
+    const spy = mockFetch({ success: true, data: [] })
+    await fetchDevicesRange(JSW, JSW.labDevices, 1, 2)
+    const urls = spy.mock.calls.map((c) => String(c[0]))
+    expect(urls).toHaveLength(6)
+    for (const d of ['FLSCLINKER', 'FLSKILNFEED', 'JSWCOAL_A1', 'JSWBMBCLRMTR_KC', 'JSWBMBCLRMTR_PC', 'JSW_C3S']) {
+      expect(urls.some((u) => u.includes(`/getDataByStEt/${d}/`))).toBe(true)
+    }
   })
 })

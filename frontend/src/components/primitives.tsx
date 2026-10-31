@@ -53,7 +53,7 @@ export function UnverifiedName({ compact = false }: { compact?: boolean }) {
   return (
     <span
       className={`unverified ${compact ? 'unverified--compact' : ''}`}
-      title="No alias has been configured for this sensor, and its name is not readable from the platform with the current credentials. The label shown is built from its category and position. Add the real name in config/sensorAliases.ts."
+      title="This sensor has no supplied name. The label shown is built from what is known (its group and position, or its bare id). Add the real name to the client spec in config/clients/ or to config/sensorAliases.ts."
     >
       alias not set
     </span>
@@ -123,7 +123,7 @@ export function ProvenanceTag({ kind }: { kind: 'measured' | 'retrieved' | 'hypo
     measured: { label: 'Measured', title: 'Read directly from the device feed.' },
     retrieved: {
       label: 'From RCA insight',
-      title: 'Returned by insight INS_df1b3c1a11de. Not recomputed by this dashboard.',
+      title: "Returned by the line's RCA insight. Not recomputed by this dashboard.",
     },
     hypothesis: {
       label: 'Needs validation',

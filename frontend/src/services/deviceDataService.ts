@@ -1,15 +1,15 @@
 /**
- * Device data access for ADANI_LAB and ADANI_RAW.
+ * Device data access: the platform's device-level routes, one device per call.
  *
- * Both routes used here are device-scoped by (devID, sensor); nothing is ever addressed
- * by D-tag alone.
+ * Rows come back keyed by the device's bare sensor id (as the platform returns them). Everything
+ * above this layer goes through `lineDataService`, which qualifies the keys as `DEVICE:SENSOR`
+ * and merges the devices of a line, so nothing downstream is ever addressed by D-tag alone.
  */
 
 import { api } from './apiClient'
 import { DAY_MS, MINUTE_MS, toEpochMs } from '../lib/time'
 import { thinRows } from '../lib/series'
 import { afterCutoff, clampEnd } from '../config/dataWindow'
-import { isImplausible } from '../config/validRanges'
 import type { TimestampRow } from '../lib/series'
 
 /* ------------------------------ latest values ------------------------------ */
@@ -52,11 +52,7 @@ export async function fetchLatest(
       out.set(sensorId, { sensorId, value: null, time: null })
       continue
     }
-    // An impossible reading (config/validRanges.ts) is no reading.
-    const value =
-      typeof entry.value === 'number' && Number.isFinite(entry.value) && !isImplausible(devID, sensorId, entry.value)
-        ? entry.value
-        : null
+    const value = typeof entry.value === 'number' && Number.isFinite(entry.value) ? entry.value : null
     out.set(sensorId, { sensorId, value, time: toEpochMs(entry.time) })
   }
 
@@ -100,8 +96,7 @@ export async function fetchRange(
     const values: Record<string, number> = {}
     for (const [key, value] of Object.entries(record)) {
       if (key === 'time') continue
-      // An impossible reading (config/validRanges.ts) is dropped; the sensor is then absent here.
-      if (typeof value === 'number' && Number.isFinite(value) && !isImplausible(devID, key, value)) values[key] = value
+      if (typeof value === 'number' && Number.isFinite(value)) values[key] = value
     }
     rows.push({ t, values })
   }
@@ -121,7 +116,7 @@ export interface ChunkedRange {
 /**
  * A dense device over a long window, fetched as parallel day-sized requests.
  *
- * `ADANI_RAW` reports ~124 sensors every minute, so one request for a week is ~30 MB and
+ * A process device reports 100+ sensors every minute, so one request for a week is ~30 MB and
  * takes ~13 s — long enough for a gateway to give up, and heavy enough to freeze the page.
  * Day chunks run a few at a time, results are merged, and anything beyond `maxSpanMs` is
  * trimmed from the *old* end (the window's end is what the operator is looking at) and
@@ -182,24 +177,3 @@ export async function fetchRangeChunked(
 
 /** Bucket size used to thin dense process data once the window exceeds a day. */
 export const PROCESS_THIN_MS = 5 * MINUTE_MS
-
-/**
- * Newest timestamp carrying data on a device, found by probing a reference sensor.
- *
- * The dashboard anchors its default window here instead of to `now`, so it does not open
- * on an empty range when the feed is behind.
- */
-export async function fetchLatestTimestamp(
-  devID: string,
-  referenceSensors: readonly string[],
-  signal?: AbortSignal,
-): Promise<number | null> {
-  const latest = await fetchLatest(devID, referenceSensors, signal)
-  let newest: number | null = null
-  for (const reading of latest.values()) {
-    if (reading.time != null && (newest == null || reading.time > newest)) {
-      newest = reading.time
-    }
-  }
-  return newest
-}

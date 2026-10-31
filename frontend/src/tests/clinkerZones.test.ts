@@ -11,7 +11,8 @@ import type { TimestampRow } from '../lib/series'
 import { HOUR_MS, MINUTE_MS } from '../lib/time'
 import { fetchRcaFindings } from '../services/rcaService'
 import type { ClinkerTargets } from '../services/rcaService'
-import { KILN_OPERATION_TRENDS, TREND_EXCLUDED_TAGS, fillingStats, kilnFilling, rpmForFilling } from '../config/kilnTrends'
+import { fillingStats, kilnFilling, kilnOperationTrends, rpmForFilling } from '../config/kilnTrends'
+import { ADANI, JSW, raw } from './lines'
 
 /** As INS_df1b3c1a11de returns them (result 6adee6b96ef9b41b70f92fa7). */
 const T: ClinkerTargets = {
@@ -165,10 +166,12 @@ describe('insight targets', () => {
 })
 
 describe('kiln-operation trends', () => {
-  const byKey = new Map(KILN_OPERATION_TRENDS.map((d) => [d.key, d]))
+  const TRENDS = kilnOperationTrends(ADANI)
+  const FILL = ADANI.kilnFilling!
+  const byKey = new Map(TRENDS.map((d) => [d.key, d]))
 
   it('lists the requested trends in order', () => {
-    expect(KILN_OPERATION_TRENDS.map((d) => d.label)).toEqual([
+    expect(TRENDS.map((d) => d.label)).toEqual([
       'Burning Zone Temp',
       'Secondary Air Temp',
       'Kiln filling degree',
@@ -182,43 +185,50 @@ describe('kiln-operation trends', () => {
   })
 
   it('leaves PC Outlet Temp off Trend Analysis', () => {
-    expect(KILN_OPERATION_TRENDS.some((d) => d.tags.includes('D77'))).toBe(false)
-    expect(TREND_EXCLUDED_TAGS.has('D77')).toBe(true)
+    expect(TRENDS.some((d) => d.tags.includes(raw('D77')))).toBe(false)
+    expect(ADANI.isTrendExcluded(raw('D77'))).toBe(true)
   })
 
   it('computes the filling degree with the plant formula, anchored on 448 t/h at 3.31 rpm = 22.56 %', () => {
-    expect(kilnFilling(448, 3.31)).toBeCloseTo(22.56, 10)
+    expect(kilnFilling(448, 3.31, FILL)).toBeCloseTo(22.56, 10)
     // Rises with feed, falls with speed.
-    expect(kilnFilling(488, 4.2)).toBeCloseTo(22.56 * (488 / 448) * (3.31 / 4.2), 10)
-    expect(kilnFilling(500, 3.31)! > kilnFilling(448, 3.31)!).toBe(true)
-    expect(kilnFilling(448, 4)! < kilnFilling(448, 3.31)!).toBe(true)
+    expect(kilnFilling(488, 4.2, FILL)).toBeCloseTo(22.56 * (488 / 448) * (3.31 / 4.2), 10)
+    expect(kilnFilling(500, 3.31, FILL)! > kilnFilling(448, 3.31, FILL)!).toBe(true)
+    expect(kilnFilling(448, 4, FILL)! < kilnFilling(448, 3.31, FILL)!).toBe(true)
     // A stopped kiln (rpm below 0.5) or a missing reading is skipped.
-    expect([kilnFilling(448, 0.49), kilnFilling(448, null), kilnFilling(null, 3.31)]).toEqual([null, null, null])
+    expect([kilnFilling(448, 0.49, FILL), kilnFilling(448, null, FILL), kilnFilling(null, 3.31, FILL)]).toEqual([null, null, null])
     const fill = byKey.get('kiln-fill')!
     expect(fill.unit).toBe('%')
     const out = fill.series([
-      { t: 1, values: { D74: 448, D73: 3.31 } },
-      { t: 2, values: { D74: 448, D73: 0.2 } },
-      { t: 3, values: { D74: 448 } },
+      { t: 1, values: { [raw('D74')]: 448, [raw('D73')]: 3.31 } },
+      { t: 2, values: { [raw('D74')]: 448, [raw('D73')]: 0.2 } },
+      { t: 3, values: { [raw('D74')]: 448 } },
     ])
     expect(out.map((p) => p.t)).toEqual([1])
     expect(out[0].v).toBeCloseTo(22.56, 10)
   })
 
   it('reports the median, the share above 18 % and the speed for 19 %', () => {
-    const s = fillingStats([14, 15, 17, 19, 20].map((v, t) => ({ t, v })))
+    const s = fillingStats([14, 15, 17, 19, 20].map((v, t) => ({ t, v })), FILL.flagAbove)
     expect(s.median).toBe(17)
     expect(s.abovePct).toBe(40) // 19 and 20 are above 18
-    expect(rpmForFilling(3.31, 22.56)).toBeCloseTo((3.31 * 22.56) / 19, 10)
-    expect(fillingStats([]).median).toBeNull()
+    expect(rpmForFilling(3.31, 22.56, FILL.speedTarget)).toBeCloseTo((3.31 * 22.56) / 19, 10)
+    expect(fillingStats([], FILL.flagAbove).median).toBeNull()
   })
 
   it('sums the cooler fans only where every one reports, leaving out the dropped fan 8', () => {
     const flow = byKey.get('cooler-flow')!
-    expect(flow.tags).not.toContain('D53')
+    expect(flow.tags).not.toContain(raw('D53'))
     expect(flow.tags).toHaveLength(12)
     const all = Object.fromEntries(flow.tags.map((t) => [t, 10]))
-    const { D9: _, ...missingOne } = all
+    const { [raw('D9')]: _, ...missingOne } = all
     expect(flow.series([{ t: 1, values: all }, { t: 2, values: missingOne }])).toEqual([{ t: 1, v: 120 }])
+  })
+
+  it('shows a line only the trends it has tags for: JSW has the two coal rates and nothing else yet', () => {
+    expect(kilnOperationTrends(JSW).map((d) => [d.label, d.tags[0]])).toEqual([
+      ['PC coal', 'ABBKLN_A1:D155'],
+      ['Kiln coal', 'ABBKLN_A1:D154'],
+    ])
   })
 })

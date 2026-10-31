@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DATA_END_MS, afterCutoff, clampEnd } from '../config/dataWindow'
+import { afterCutoff, applyDataEnd, clampEnd, dataEndMs } from '../config/dataWindow'
+import { resolveLine } from '../config/plants'
 import { fetchRange } from '../services/deviceDataService'
 import { processChunkMs } from '../hooks/useDashboardData'
 import { DAY_MS, HOUR_MS } from '../lib/time'
@@ -10,8 +11,12 @@ const CUTOFF = Date.parse('2026-08-28T03:00:00+05:30')
 describe('data cut-off', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('is 28 Aug 2026, 03:00 plant time by default', () => {
-    expect(DATA_END_MS).toBe(CUTOFF)
+  it('is 28 Aug 2026, 03:00 plant time for Adani, and none for JSW', () => {
+    applyDataEnd(resolveLine({ plantId: 'jsw', lineId: 'kiln' }).plant.dataEnd)
+    expect(dataEndMs()).toBeNull()
+    expect(clampEnd(CUTOFF + 1)).toBe(CUTOFF + 1)
+    applyDataEnd(resolveLine({ plantId: 'adani', lineId: 'line1' }).plant.dataEnd)
+    expect(dataEndMs()).toBe(CUTOFF)
     expect(clampEnd(CUTOFF + 1)).toBe(CUTOFF)
     expect(clampEnd(CUTOFF - 1)).toBe(CUTOFF - 1)
     expect([afterCutoff(CUTOFF), afterCutoff(CUTOFF + 1), afterCutoff(null)]).toEqual([false, true, false])

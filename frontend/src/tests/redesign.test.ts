@@ -6,6 +6,7 @@ import { relevantParameters } from '../config/rcaParameters'
 import { PLANTS, resolveLine } from '../config/plants'
 import { HOUR_MS, MINUTE_MS } from '../lib/time'
 import type { ClinkerTargets, RcaFinding } from '../services/rcaService'
+import { ADANI } from './lines'
 
 const T: ClinkerTargets = {
   c3s: 43,
@@ -170,7 +171,7 @@ describe('the live insight format (numbered labels)', () => {
   })
 
   it('maps the named parameter to its process tag', () => {
-    const p = relevantParameters(live).process.map((x) => x.sensorId)
+    const p = relevantParameters(live, ADANI).process.map((x) => x.sensorId)
     expect(p).toContain('D117') // Secondary Air Temp
     expect(p).toContain('D0') // Under burnt → burning zone
   })
@@ -183,9 +184,11 @@ describe('the live insight format (numbered labels)', () => {
 })
 
 describe('plants and lines', () => {
-  it('resolves a selection, falling back to the first configured line', () => {
+  it('resolves a selection, falling back to the first configured line (JSW)', () => {
     expect(resolveLine(null).line.id).toBe(PLANTS[0].lines[0].id)
-    expect(resolveLine({ plantId: 'nope', lineId: 'nope' }).line.insightId).toBe('INS_df1b3c1a11de')
+    expect(resolveLine(null).plant.id).toBe('jsw')
+    expect(resolveLine({ plantId: 'nope', lineId: 'nope' }).line.insightId).toBe('INS_c3snandyalrca')
+    expect(resolveLine({ plantId: 'adani', lineId: 'line1' }).line.insightId).toBe('INS_df1b3c1a11de')
   })
 })
 

@@ -9,14 +9,23 @@
  * instead of showing percentages that would imply a classification nobody made.
  */
 
-import { BIN_THRESHOLDS } from '../config/binLimits'
 import { statusOf } from '../lib/binCompliance'
 import { sortRows } from '../lib/compliance'
 import type { ComplianceRow } from '../lib/compliance'
 
 const fmtPct = (v: number | null) => (v == null ? '—' : v.toFixed(2))
 
-export function ComplianceTable({ rows }: { rows: readonly ComplianceRow[] }) {
+/** Colour thresholds when the line has no limit table of its own (whose thresholds apply otherwise). */
+const DEFAULT_THRESHOLDS = { good: 68, attention: 50 }
+
+export function ComplianceTable({
+  rows,
+  thresholds,
+}: {
+  rows: readonly ComplianceRow[]
+  thresholds: { good: number; attention: number } | null
+}) {
+  const t = thresholds ?? DEFAULT_THRESHOLDS
   return (
     <div className="comp__wrap">
       <table className="comp">
@@ -52,8 +61,8 @@ export function ComplianceTable({ rows }: { rows: readonly ComplianceRow[] }) {
                 <>
                   <td className="comp__num comp__pct">{fmtPct(r.below)}</td>
                   <td
-                    className={`comp__num comp__pct comp__within comp__within--${statusOf(r.within)}`}
-                    title={`Green ≥ ${BIN_THRESHOLDS.good}%, orange ≥ ${BIN_THRESHOLDS.attention}%, red below`}
+                    className={`comp__num comp__pct comp__within comp__within--${statusOf(r.within, t)}`}
+                    title={`Green ≥ ${t.good}%, orange ≥ ${t.attention}%, red below`}
                   >
                     {fmtPct(r.within)}
                   </td>

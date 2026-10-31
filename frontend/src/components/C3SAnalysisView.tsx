@@ -17,15 +17,6 @@ import { lazy, Suspense, useMemo } from 'react'
 import type { DashboardData, SectionError } from '../hooks/useDashboardData'
 import type { Timeline48Data } from '../hooks/useTimeline48'
 import type { ClinkerTargets, RcaFinding } from '../services/rcaService'
-import {
-  ACTUAL_C3S,
-  CLINKER_FREE_LIME,
-  LAB_DEVICE,
-  PREDICTED_C3S,
-  PROCESS_DEVICE,
-  getSensor,
-  sensorLabel,
-} from '../config/deviceMappings'
 import { relevantParameters } from '../config/rcaParameters'
 import { extractSeries, nearestWithin } from '../lib/series'
 import type { Point, TimestampRow } from '../lib/series'
@@ -108,6 +99,10 @@ export function C3SAnalysisView({
   eventProcess: { rows: readonly TimestampRow[]; loading: boolean; error: SectionError | null }
   onOpenTrends: () => void
 }) {
+  const line = d.line
+  const PREDICTED_C3S = line.predictedC3S
+  const ACTUAL_C3S = line.actualC3S
+  const CLINKER_FREE_LIME = line.freeLime
 
   const intervals = useMemo(() => {
     if (timeline.end == null) return []
@@ -118,7 +113,7 @@ export function C3SAnalysisView({
       findings: d.rcaAll,
       targets,
     })
-  }, [timeline.end, timeline.rows, d.rcaAll, targets])
+  }, [timeline.end, timeline.rows, d.rcaAll, targets, PREDICTED_C3S, CLINKER_FREE_LIME])
 
   // Each prediction's class in the selected range, for the trend tooltip.
   const predictionZones = useMemo(() => {
@@ -128,7 +123,7 @@ export function C3SAnalysisView({
       out.set(p.t, classifyClinker(p.c3s, p.freeLime, targets))
     }
     return out
-  }, [d.labRows, targets])
+  }, [d.labRows, targets, PREDICTED_C3S, CLINKER_FREE_LIME])
 
   const trendEvents = useMemo<TrendEvent[]>(
     () =>
@@ -150,12 +145,12 @@ export function C3SAnalysisView({
   const observed = useMemo<ObservedParameter[]>(() => {
     if (!selected) return []
     const at = selected.eventTime
-    return relevantParameters(selected).process.map((p) => {
-      const def = getSensor(PROCESS_DEVICE, p.sensorId)
-      const point = at == null ? null : valueAt(extractSeries(eventProcess.rows, p.sensorId), at)
-      return { key: p.sensorId, label: def?.label ?? p.sensorId, unit: def?.unit ?? null, value: point?.v ?? null, sources: p.sources }
+    return relevantParameters(selected, line).process.map((p) => {
+      const def = line.describe(p.key)
+      const point = at == null ? null : valueAt(extractSeries(eventProcess.rows, p.key), at)
+      return { key: p.key, label: def.label, unit: def.unit, value: point?.v ?? null, sources: p.sources }
     })
-  }, [selected, eventProcess.rows])
+  }, [selected, eventProcess.rows, line])
 
 
   const latestPredicted = d.predicted[d.predicted.length - 1] ?? null
@@ -221,22 +216,22 @@ export function C3SAnalysisView({
           <Panel title="Predicted vs Actual C3S">
             <div className="stats">
               <Stat
-                label={sensorLabel(LAB_DEVICE, PREDICTED_C3S)}
+                label={line.label(PREDICTED_C3S)}
                 value={latestPredicted?.v ?? null}
                 unit="%"
                 time={latestPredicted?.t ?? null}
                 previous={previousOf(d.predicted)}
                 now={now}
-                title={`${LAB_DEVICE}:${PREDICTED_C3S} · latest in range`}
+                title={`${PREDICTED_C3S} · latest in range`}
               />
               <Stat
-                label={sensorLabel(LAB_DEVICE, ACTUAL_C3S)}
+                label={line.label(ACTUAL_C3S)}
                 value={latestActual?.v ?? null}
                 unit="%"
                 time={latestActual?.t ?? null}
                 previous={previousOf(d.actual)}
                 now={now}
-                title={`${LAB_DEVICE}:${ACTUAL_C3S} · latest in range`}
+                title={`${ACTUAL_C3S} · latest in range`}
               />
               <Stat
                 label="Prediction error"

@@ -2,7 +2,7 @@
  * Per-shift report for the Executive View.
  *
  * Built from three things that all fall inside one shift window:
- *   - the laboratory C3S samples (actual D58, predicted D55),
+ *   - the laboratory C3S samples (the line's actual and predicted C3S),
  *   - the process history for the set points the RCA insight recommends changing,
  *   - the RCA insight's own findings for deviations whose event time is in the shift.
  *
@@ -19,23 +19,21 @@ import type { Point, TimestampRow } from './series'
 import type { ShiftWindow } from './shifts'
 import type { RcaFinding, RcaSeverity } from '../services/rcaService'
 import { GENERIC_LABEL } from '../services/rcaService'
-import {
-  ACTUAL_C3S,
-  PREDICTED_C3S,
-  PROCESS_DEVICE,
-  getSensor,
-} from '../config/deviceMappings'
+import { parseAction } from './recommendations'
+import type { LineModel } from '../config/lineModel'
+import type { Role } from '../config/clients/types'
 
 /**
- * Recommendation labels the insight uses that are measured on the process device. The
- * labels match the process tag map's names (Kiln Coal, PC Coal, Solid AFR, Kiln feed).
- * Labels with no entry (raw mix, "Set points", "Fuel and feed") have no single sensor.
+ * Recommendation labels the insight uses that are measured on a process device, by role; the
+ * line resolves each to its own tag. Labels with no entry (raw mix, "Set points", "Fuel and
+ * feed") have no single sensor.
  */
-export const ACTION_SENSORS: Readonly<Record<string, string>> = {
-  'Kiln coal': 'D66',
-  'PC coal': 'D75',
-  'Solid AFR': 'D118',
-  'Kiln feed': 'D74',
+export const ACTION_ROLES: Readonly<Record<string, Role>> = {
+  'Kiln coal': 'kilnCoal',
+  'PC coal': 'pcCoal',
+  'Low-NOx coal': 'lowNoxCoal',
+  'Solid AFR': 'solidAfr',
+  'Kiln feed': 'kilnFeed',
 }
 
 const inShift = (t: number, w: ShiftWindow) => t >= w.start && t < w.end
@@ -64,7 +62,8 @@ export interface LabSummary {
 }
 
 export interface ProcessObservation {
-  sensorId: string
+  /** Sensor key of the set point. */
+  key: string
   label: string
   unit: string | null
   n: number
@@ -162,9 +161,9 @@ export function parseRecommendation(text: string): ParsedAction | null {
  * Building the report
  * ------------------------------------------------------------------ */
 
-function labSummary(shift: ShiftWindow, labRows: readonly TimestampRow[]): LabSummary {
-  const actual = extractSeries(labRows, ACTUAL_C3S).filter((p) => inShift(p.t, shift))
-  const predicted = extractSeries(labRows, PREDICTED_C3S).filter((p) => inShift(p.t, shift))
+function labSummary(shift: ShiftWindow, labRows: readonly TimestampRow[], line: LineModel): LabSummary {
+  const actual = extractSeries(labRows, line.actualC3S).filter((p) => inShift(p.t, shift))
+  const predicted = extractSeries(labRows, line.predictedC3S).filter((p) => inShift(p.t, shift))
   const matched = matchSamples(predicted, actual).filter((m) => m.error != null)
   const values = actual.map((p) => p.v)
   return {
@@ -182,18 +181,19 @@ function labSummary(shift: ShiftWindow, labRows: readonly TimestampRow[]): LabSu
 }
 
 function observe(
-  sensorId: string,
+  key: string,
   shift: ShiftWindow,
   processRows: readonly TimestampRow[],
+  line: LineModel,
 ): ProcessObservation | null {
-  const pts: Point[] = extractSeries(processRows, sensorId).filter((p) => inShift(p.t, shift))
+  const pts: Point[] = extractSeries(processRows, key).filter((p) => inShift(p.t, shift))
   if (pts.length === 0) return null
   const values = pts.map((p) => p.v)
-  const def = getSensor(PROCESS_DEVICE, sensorId)
+  const def = line.describe(key)
   return {
-    sensorId,
-    label: def?.label ?? sensorId,
-    unit: def?.unit ?? null,
+    key,
+    label: def.label,
+    unit: def.unit,
     n: values.length,
     mean: mean(values) as number,
     min: Math.min(...values),
@@ -248,6 +248,7 @@ function summariseActions(
   events: readonly RcaFinding[],
   shift: ShiftWindow,
   processRows: readonly TimestampRow[],
+  line: LineModel,
 ): { actions: ActionSummary[]; holds: string[] } {
   const groups = new Map<string, ActionSummary & { changes: number[] }>()
   const holds = new Set<string>()
@@ -259,18 +260,22 @@ function summariseActions(
         holds.add(r.text)
         continue
       }
-      const key = `${r.label}|${parsed.direction}`
+      // The current insight format numbers its labels ("Set point 1") and names the set point in
+      // the sentence ("Reduce Kiln coal from …"); the set point is the thing to group by.
+      const label = GENERIC_LABEL.test(r.label.trim()) ? parseAction(r.label, r.text).parameter || r.label : r.label
+      const key = `${label}|${parsed.direction}`
       let g = groups.get(key)
       if (!g) {
-        const sensorId = ACTION_SENSORS[r.label]
+        const role = ACTION_ROLES[label]
+        const sensor = role ? line.role(role) : null
         g = {
-          label: r.label,
+          label,
           direction: parsed.direction,
           count: 0,
           meanChange: 0,
           unit: parsed.unit,
           examples: [],
-          process: sensorId ? observe(sensorId, shift, processRows) : null,
+          process: sensor ? observe(sensor, shift, processRows, line) : null,
           changes: [],
         }
         groups.set(key, g)
@@ -349,8 +354,9 @@ export function buildShiftReport(input: {
   labRows: readonly TimestampRow[]
   processRows: readonly TimestampRow[]
   findings: readonly RcaFinding[]
+  line: LineModel
 }): ShiftReport {
-  const { shift, labRows, processRows, findings } = input
+  const { shift, labRows, processRows, findings, line } = input
 
   // One result per event: an event the insight analysed again (a re-run) counts once, newest kept.
   const byTime = new Map<number, RcaFinding>()
@@ -361,8 +367,8 @@ export function buildShiftReport(input: {
   }
   const events = [...byTime.values()].sort(bySignificance)
 
-  const lab = labSummary(shift, labRows)
-  const { actions, holds } = summariseActions(events, shift, processRows)
+  const lab = labSummary(shift, labRows, line)
+  const { actions, holds } = summariseActions(events, shift, processRows, line)
   const notes = [...new Set(events.flatMap((f) => f.notes))]
 
   return {

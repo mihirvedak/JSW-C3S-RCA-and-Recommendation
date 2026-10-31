@@ -1,41 +1,24 @@
 /**
- * Process limits by kiln-feed (TPH) bin, from the plant's limit table
- * `adani_lsl_usl_K05_round5.json` (Adani Maratha, generated 2026-10-27T11:48:58+05:30).
+ * Adani Maratha: process limits by kiln-feed (TPH) bin, from the plant's limit table
+ * `adani_lsl_usl_K05_round5.json` (generated 2026-10-27T11:48:58+05:30).
  *
  * How the file made them (its own words): "LSL/USL = mean +/- 1 sd of the golden rows after
  * 1.5xIQR trim", the golden period being chosen per bin (best SHC / TSR run of at least 180 min).
  * So a process sitting in its golden state is inside LSL–USL about 68 % of the time, which is why
- * the status thresholds below are 68 % and 50 %, not 90 %.
+ * the status thresholds are 68 % and 50 %, not 90 %.
  *
  * Bins are on kiln feed (`MT.431-FM1.F4:PV` = ADANI_RAW D74), edges 370 / 440 / 460 / 480 / 500
  * / 520 / 565 t/h; feed below 370 is excluded by the file. Only the parameters the Executive View
  * reports are carried, copied as the file states them: [LSL, USL, target, status]. Names are the
- * file's own and are mapped to ADANI_RAW tags by the tag map's labels (`binLimitTags`).
+ * file's own and are mapped to ADANI_RAW tags by the tag map's labels (`adaniBinLimits`).
  *
  * The file's note: status DROP or UNRELIABLE means the tag should not be used as a set point.
  */
 
-import { RAW_TAGS } from './tagMaps'
+import { RAW_TAGS } from './adaniTagMaps'
+import type { BinLimitsSpec, LimitStatus, TphBin } from './types'
 
-export type LimitStatus = 'USABLE' | 'FLAG' | 'DROP' | 'UNRELIABLE'
-
-export interface BinLimit {
-  lsl: number
-  usl: number
-  target: number
-  status: LimitStatus
-}
-
-export interface TphBin {
-  id: string
-  min: number
-  max: number
-}
-
-/** The tag the bins are cut on: kiln feed, t/h. */
-export const BIN_SENSOR = 'D74'
-
-export const TPH_BINS: readonly TphBin[] = [
+const TPH_BINS: readonly TphBin[] = [
   { id: '370440', min: 370, max: 440 },
   { id: '440460', min: 440, max: 460 },
   { id: '460480', min: 460, max: 480 },
@@ -44,15 +27,12 @@ export const TPH_BINS: readonly TphBin[] = [
   { id: '520565', min: 520, max: 565 },
 ]
 
-export const BIN_LIMITS_SOURCE = 'adani_lsl_usl_K05_round5.json (mean ± 1 sd of each bin’s golden period)'
-
-/** Status at or above these shares of judged time in range. */
-export const BIN_THRESHOLDS = { good: 68, attention: 50 }
+const BIN_LIMITS_SOURCE = 'adani_lsl_usl_K05_round5.json (mean ± 1 sd of each bin’s golden period)'
 
 type Row = readonly [lsl: number, usl: number, target: number, status: LimitStatus]
 
 /** Bin id → parameter (file name) → limits. A parameter absent from a bin has no limit there. */
-const TABLE: Readonly<Record<string, Readonly<Record<string, Row>>>> = {
+const ROWS: Readonly<Record<string, Readonly<Record<string, Row>>>> = {
   '370440': {
     'Kiln feed': [413.504, 431.733, 424.829, 'USABLE'],
     'Kiln RPM': [3.027, 3.126, 3.07, 'DROP'],
@@ -188,12 +168,19 @@ const TABLE: Readonly<Record<string, Readonly<Record<string, Row>>>> = {
   },
 }
 
+const TABLE = Object.fromEntries(
+  Object.entries(ROWS).map(([bin, params]) => [
+    bin,
+    Object.fromEntries(Object.entries(params).map(([name, r]) => [name, { lsl: r[0], usl: r[1], target: r[2], status: r[3] }])),
+  ]),
+)
+
 /**
  * The rows the Executive View reports, in this order, by the file's parameter name: the kiln
  * operation set the plant asked for, then the cooler fans one by one (the file has no total, and
  * no flow for fan 8).
  */
-export const BIN_PARAMETERS: readonly string[] = [
+const BIN_PARAMETERS: readonly string[] = [
   'Burning Zone Temp',
   'Secondary Air Temp',
   'TAD Temperature',
@@ -206,25 +193,20 @@ export const BIN_PARAMETERS: readonly string[] = [
   ...[1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13].map((n) => `Cooler Fan ${n} Flow`),
 ]
 
-/** The limits of one parameter in one bin, or null where the file gives none. */
-export function binLimit(binId: string, parameter: string): BinLimit | null {
-  const r = TABLE[binId]?.[parameter]
-  return r ? { lsl: r[0], usl: r[1], target: r[2], status: r[3] } : null
-}
-
-/** The file's parameter names → ADANI_RAW D-tags, by the tag map's labels. Unmatched names are left out. */
-export function binLimitTags(): Map<string, string> {
+/** The file's rows as the bin-limits spec of the Adani process device. */
+export function adaniBinLimits(processDevice: string): BinLimitsSpec {
+  // The file's parameter names → ADANI_RAW D-tags, by the tag map's labels. Unmatched names are left out.
   const byLabel = new Map(Object.entries(RAW_TAGS).map(([id, t]) => [t.label.toLowerCase(), id]))
-  const out = new Map<string, string>()
-  for (const name of BIN_PARAMETERS) {
+  const parameters = BIN_PARAMETERS.flatMap((name) => {
     const id = byLabel.get(name.toLowerCase())
-    if (id) out.set(name, id)
+    return id ? [{ name, ref: { devID: processDevice, sensorId: id } }] : []
+  })
+  return {
+    binRole: 'kilnFeed',
+    bins: TPH_BINS,
+    source: BIN_LIMITS_SOURCE,
+    thresholds: { good: 68, attention: 50 },
+    parameters,
+    table: TABLE,
   }
-  return out
-}
-
-/** The bin a kiln-feed value falls in; the top edge belongs to the last bin. Null outside 370–565. */
-export function binOf(feed: number): TphBin | null {
-  const last = TPH_BINS[TPH_BINS.length - 1]
-  return TPH_BINS.find((b) => feed >= b.min && (feed < b.max || (b === last && feed <= b.max))) ?? null
 }

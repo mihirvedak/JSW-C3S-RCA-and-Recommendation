@@ -5,34 +5,26 @@
  * source never blanks another:
  *   - the newest-sample probe (anchors presets, drives the "feed is behind" notice),
  *   - the full RCA result set (filtered to the window here, not re-fetched per selection),
- *   - the laboratory range (the C3S trend, KPIs, lab grid),
- *   - the process range (heavy; chunked and thinned, and never blocks the C3S trend).
+ *   - the laboratory range: every lab-type device of the line (the C3S trend, KPIs, lab grid),
+ *   - the process range: every process device (heavy; chunked and thinned, never blocks the trend).
+ * Rows are keyed by sensor key (`DEVICE:SENSOR`, see `lineDataService`).
  *
  * Every figure is derived from the selected window, so the global time picker drives the
  * whole dashboard rather than only the chart.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  LAB_SENSORS,
-  PROCESS_SENSORS,
-  PREDICTED_C3S,
-  ACTUAL_C3S,
-} from '../config/deviceMappings'
-import {
-  fetchLatestTimestamp,
-  fetchRangeChunked,
-  PROCESS_THIN_MS,
-} from '../services/deviceDataService'
+import { PROCESS_THIN_MS } from '../services/deviceDataService'
 import type { LastReading } from '../services/deviceDataService'
+import { fetchDevicesRangeChunked, fetchNewestC3S } from '../services/lineDataService'
 import { fetchAllRcaFindings } from '../services/rcaService'
 import type { RcaFinding, ShiftSummary } from '../services/rcaService'
 import { extractSeries, latestFromRows, matchSamples, unmatchedPredictions } from '../lib/series'
 import type { Band, MatchedSample, Point, TimestampRow } from '../lib/series'
 import { DAY_MS, HOUR_MS, MINUTE_MS } from '../lib/time'
 import { AuthError } from '../services/apiClient'
-import { DATA_END_MS, afterCutoff, clampEnd } from '../config/dataWindow'
-import type { LineConfig } from '../config/plants'
+import { afterCutoff, clampEnd, dataEndMs } from '../config/dataWindow'
+import type { LineModel } from '../config/lineModel'
 
 export const RANGE_OPTIONS = [
   { id: '1h', label: 'Last 1 Hour', spanMs: HOUR_MS },
@@ -72,7 +64,7 @@ export interface SectionError {
 
 export interface DashboardData {
   /** The production line everything below was loaded for. */
-  line: LineConfig
+  line: LineModel
   state: LoadState
   /** Non-null when the whole load failed before anything could be read. */
   fatalError: SectionError | null
@@ -94,7 +86,7 @@ export interface DashboardData {
   /** True when the window is short enough that its process rows are every reading (not thinned or shortened). */
   processFull: boolean
   labError: SectionError | null
-  /** Latest value per sensor *within the selected window*. */
+  /** Latest value per sensor key *within the selected window*. */
   labLatest: Map<string, LastReading>
   processLatest: Map<string, LastReading>
   dataError: SectionError | null
@@ -131,9 +123,6 @@ function toSectionError(err: unknown): SectionError {
   return { message: 'Unknown error', isAuth: false }
 }
 
-const LAB_SENSOR_IDS = LAB_SENSORS.map((x) => x.sensorId)
-const PROCESS_SENSOR_IDS = PROCESS_SENSORS.map((x) => x.sensorId)
-
 /** Beyond this, the newest reading is called out as stale in the header. */
 export const STALE_AFTER_MS = 2 * HOUR_MS
 
@@ -161,29 +150,26 @@ export function processChunkMs(spanMs: number): number {
   return Math.min(DAY_MS, Math.max(6 * HOUR_MS, Math.ceil(spanMs / 4)))
 }
 
-/** Latest-in-window readings as the `LastReading` map the panels consume. */
-function toReadings(
-  sensorIds: readonly string[],
-  rows: readonly TimestampRow[],
-): Map<string, LastReading> {
-  const found = latestFromRows(rows)
+/** Latest-in-window readings, by sensor key, as the `LastReading` map the panels consume. */
+function toReadings(rows: readonly TimestampRow[]): Map<string, LastReading> {
   const out = new Map<string, LastReading>()
-  for (const sensorId of sensorIds) {
-    const hit = found.get(sensorId)
-    out.set(sensorId, { sensorId, value: hit?.value ?? null, time: hit?.time ?? null })
-  }
+  for (const [key, hit] of latestFromRows(rows)) out.set(key, { sensorId: key, value: hit.value, time: hit.time })
   return out
 }
 
-export function useDashboardData(selection: TimeSelection, line: LineConfig): DashboardData {
-  // Primitives, so a new line object with the same IDs does not refetch.
-  const { labDevice, processDevice, insightId } = line
-  // With a data cut-off in the past, presets can hang from it at once: the range loads start
-  // without waiting for the newest-sample probe, which only moves the anchor earlier if the feed
-  // stopped before the cut-off.
-  const [anchorMs, setAnchorMs] = useState<number | null>(() =>
-    DATA_END_MS != null && DATA_END_MS <= Date.now() ? DATA_END_MS : null,
-  )
+/** With a data cut-off in the past, presets can hang from it before the newest-sample probe answers. */
+const initialAnchor = () => {
+  const end = dataEndMs()
+  return end != null && end <= Date.now() ? end : null
+}
+
+export function useDashboardData(selection: TimeSelection, line: LineModel): DashboardData {
+  // The line's identity and device lists, as primitives, so a re-render never refetches.
+  const lineKey = `${line.plant.id}/${line.id}`
+  const { insightId } = line
+  const labDevices = line.labDevices.join(',')
+  const processDevices = line.processDevices.join(',')
+  const [anchorMs, setAnchorMs] = useState<number | null>(initialAnchor)
   const [anchorError, setAnchorError] = useState<SectionError | null>(null)
 
   const [labRows, setLabRows] = useState<TimestampRow[]>([])
@@ -221,10 +207,15 @@ export function useDashboardData(selection: TimeSelection, line: LineConfig): Da
     return { windowStart: anchorMs - spanMs, windowEnd: anchorMs + 1 } // inclusive of the anchor
   }, [isCustom, customStart, customEnd, anchorMs, spanMs])
 
+  // A new line starts from its own cut-off (or none) until its probe answers.
+  useEffect(() => {
+    setAnchorMs(initialAnchor())
+  }, [lineKey])
+
   // 1. Newest-sample probe. Once per refresh, not per selection.
   useEffect(() => {
     const controller = new AbortController()
-    fetchLatestTimestamp(labDevice, [PREDICTED_C3S, ACTUAL_C3S], controller.signal)
+    fetchNewestC3S(line, controller.signal)
       .then((t) => {
         // Presets hang from the newest sample, never past the data cut-off.
         setAnchorMs(clampEnd(t ?? Date.now()))
@@ -238,7 +229,8 @@ export function useDashboardData(selection: TimeSelection, line: LineConfig): Da
         setAnchorError(toSectionError(err))
       })
     return () => controller.abort()
-  }, [nonce, labDevice])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `line` is identified by lineKey
+  }, [nonce, lineKey])
 
   // 2. RCA — the whole set, once per refresh. Filtering to the window is a memo below.
   useEffect(() => {
@@ -276,7 +268,7 @@ export function useDashboardData(selection: TimeSelection, line: LineConfig): Da
     setLabRows([]) // never leave the previous window's points under the new axis
     // Every sample of the range, however long: a long range is split into week-sized requests run
     // side by side, never shortened, so the C3S trend and zone plots see the whole range.
-    fetchRangeChunked(labDevice, windowStart, windowEnd, {
+    fetchDevicesRangeChunked(line, line.labDevices, windowStart, windowEnd, {
       // Up to a week (with a minute's slack for the inclusive "7 days" preset) is one request.
       chunkMs: windowEnd - windowStart <= LAB_CHUNK_MS + MINUTE_MS ? Math.max(1, windowEnd - windowStart) : LAB_CHUNK_MS,
       maxSpanMs: Number.POSITIVE_INFINITY,
@@ -296,7 +288,8 @@ export function useDashboardData(selection: TimeSelection, line: LineConfig): Da
         if (!controller.signal.aborted) setLabLoading(false)
       })
     return () => controller.abort()
-  }, [windowStart, windowEnd, nonce, labDevice])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `line` is identified by labDevices
+  }, [windowStart, windowEnd, nonce, lineKey, labDevices])
 
   // 4. Process range — heavy, so chunked, thinned and independent of the above.
   useEffect(() => {
@@ -304,7 +297,7 @@ export function useDashboardData(selection: TimeSelection, line: LineConfig): Da
     const controller = new AbortController()
     setProcessLoading(true)
     setProcessRows([])
-    fetchRangeChunked(processDevice, windowStart, windowEnd, {
+    fetchDevicesRangeChunked(line, line.processDevices, windowStart, windowEnd, {
       chunkMs: processChunkMs(windowEnd - windowStart),
       maxSpanMs: PROCESS_MAX_SPAN_MS,
       thinMs: windowEnd - windowStart > PROCESS_THIN_ABOVE_MS ? PROCESS_THIN_MS : 0,
@@ -324,7 +317,8 @@ export function useDashboardData(selection: TimeSelection, line: LineConfig): Da
         if (!controller.signal.aborted) setProcessLoading(false)
       })
     return () => controller.abort()
-  }, [windowStart, windowEnd, nonce, processDevice])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `line` is identified by processDevices
+  }, [windowStart, windowEnd, nonce, lineKey, processDevices])
 
   const rca = useMemo(() => {
     if (windowStart == null || windowEnd == null) return []
@@ -333,13 +327,13 @@ export function useDashboardData(selection: TimeSelection, line: LineConfig): Da
     )
   }, [rcaAll, windowStart, windowEnd])
 
-  const predicted = useMemo(() => extractSeries(labRows, PREDICTED_C3S), [labRows])
-  const actual = useMemo(() => extractSeries(labRows, ACTUAL_C3S), [labRows])
+  const predicted = useMemo(() => extractSeries(labRows, line.predictedC3S), [labRows, line])
+  const actual = useMemo(() => extractSeries(labRows, line.actualC3S), [labRows, line])
   const matched = useMemo(() => matchSamples(predicted, actual), [predicted, actual])
   const awaitingLab = useMemo(() => unmatchedPredictions(predicted, actual), [predicted, actual])
 
-  const labLatest = useMemo(() => toReadings(LAB_SENSOR_IDS, labRows), [labRows])
-  const processLatest = useMemo(() => toReadings(PROCESS_SENSOR_IDS, processRows), [processRows])
+  const labLatest = useMemo(() => toReadings(labRows), [labRows])
+  const processLatest = useMemo(() => toReadings(processRows), [processRows])
 
   // The insight no longer supplies an acceptable band (only a gap to a single target), so
   // none is drawn. Kept on the return type so the chart and KPI cards stay band-aware.

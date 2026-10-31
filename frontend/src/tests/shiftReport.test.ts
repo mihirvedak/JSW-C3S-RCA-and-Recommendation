@@ -3,6 +3,7 @@ import { buildShiftReport, parseRecommendation } from '../lib/shiftReport'
 import type { TimestampRow } from '../lib/series'
 import type { ShiftWindow } from '../lib/shifts'
 import type { RcaFinding } from '../services/rcaService'
+import { ADANI, lab as L, raw } from './lines'
 
 const ist = (s: string) => Date.parse(`${s}+05:30`)
 
@@ -72,17 +73,17 @@ describe('parseRecommendation', () => {
 
 describe('buildShiftReport', () => {
   const labRows: TimestampRow[] = [
-    { t: ist('2026-08-27T05:30:00'), values: { D58: 50, D55: 50 } }, // before the shift
-    { t: ist('2026-08-27T07:30:00'), values: { D58: 38.0, D55: 39.0 } },
-    { t: ist('2026-08-27T09:30:00'), values: { D58: 40.0, D55: 39.5 } },
-    { t: ist('2026-08-27T11:30:00'), values: { D58: 42.0, D55: 41.0 } },
-    { t: ist('2026-08-27T14:00:00'), values: { D58: 60, D55: 60 } }, // exactly at the end: next shift
+    { t: ist('2026-08-27T05:30:00'), values: { [L('D58')]: 50, [L('D55')]: 50 } }, // before the shift
+    { t: ist('2026-08-27T07:30:00'), values: { [L('D58')]: 38.0, [L('D55')]: 39.0 } },
+    { t: ist('2026-08-27T09:30:00'), values: { [L('D58')]: 40.0, [L('D55')]: 39.5 } },
+    { t: ist('2026-08-27T11:30:00'), values: { [L('D58')]: 42.0, [L('D55')]: 41.0 } },
+    { t: ist('2026-08-27T14:00:00'), values: { [L('D58')]: 60, [L('D55')]: 60 } }, // exactly at the end: next shift
   ]
   const processRows: TimestampRow[] = [
-    { t: ist('2026-08-27T05:00:00'), values: { D66: 99 } },
-    { t: ist('2026-08-27T08:00:00'), values: { D66: 30, D118: 14 } },
-    { t: ist('2026-08-27T12:00:00'), values: { D66: 32, D118: 15 } },
-    { t: ist('2026-08-27T15:00:00'), values: { D66: 99 } },
+    { t: ist('2026-08-27T05:00:00'), values: { [raw('D66')]: 99 } },
+    { t: ist('2026-08-27T08:00:00'), values: { [raw('D66')]: 30, [raw('D118')]: 14 } },
+    { t: ist('2026-08-27T12:00:00'), values: { [raw('D66')]: 32, [raw('D118')]: 15 } },
+    { t: ist('2026-08-27T15:00:00'), values: { [raw('D66')]: 99 } },
   ]
 
   const e1 = finding({
@@ -119,6 +120,7 @@ describe('buildShiftReport', () => {
     labRows,
     processRows,
     findings: [e2, outside, e1],
+    line: ADANI,
   })
 
   it('uses only samples and events inside the shift window', () => {
@@ -168,9 +170,9 @@ describe('buildShiftReport', () => {
 
   it('attaches the set point\'s process behaviour over the shift only', () => {
     const kiln = report.actions[0].process
-    expect(kiln).toMatchObject({ sensorId: 'D66', label: 'Kiln Coal', unit: 't/h', n: 2, min: 30, max: 32 })
+    expect(kiln).toMatchObject({ key: raw('D66'), label: 'Kiln Coal', unit: 't/h', n: 2, min: 30, max: 32 })
     expect(kiln?.mean).toBe(31) // the 05:00 and 15:00 readings are outside the shift
-    expect(report.actions[1].process).toMatchObject({ sensorId: 'D118', label: 'Solid AFR', mean: 14.5 })
+    expect(report.actions[1].process).toMatchObject({ key: raw('D118'), label: 'Solid AFR', mean: 14.5 })
   })
 
   it('de-duplicates the insight\'s caveats', () => {
@@ -185,10 +187,10 @@ describe('buildShiftReport', () => {
 })
 
 describe('buildShiftReport — thin evidence', () => {
-  const lab: TimestampRow[] = [{ t: ist('2026-08-27T08:00:00'), values: { D58: 39, D55: 39 } }]
+  const lab: TimestampRow[] = [{ t: ist('2026-08-27T08:00:00'), values: { [L('D58')]: 39, [L('D55')]: 39 } }]
 
   it('makes no recommendation when the insight analysed nothing in the shift', () => {
-    const r = buildShiftReport({ shift: SHIFT, labRows: lab, processRows: [], findings: [] })
+    const r = buildShiftReport({ shift: SHIFT, labRows: lab, processRows: [], findings: [], line: ADANI })
     expect(r.assessment.level).toBe('none')
     expect(r.actions).toEqual([])
     expect(r.assessment.message).toMatch(/no recommendation/i)
@@ -200,6 +202,7 @@ describe('buildShiftReport — thin evidence', () => {
       shift: SHIFT,
       labRows: lab,
       processRows: [],
+      line: ADANI,
       findings: [
         finding({ id: 'only', time: '2026-08-27T09:00:00', recommendations: [{ label: 'Kiln coal', text: KILN_COAL }] }),
       ],
@@ -215,6 +218,7 @@ describe('buildShiftReport — thin evidence', () => {
       shift: SHIFT,
       labRows: lab,
       processRows: [],
+      line: ADANI,
       findings: [
         finding({
           id: 'hold',
@@ -229,10 +233,31 @@ describe('buildShiftReport — thin evidence', () => {
   })
 
   it('reports an empty shift with no lab data without inventing values', () => {
-    const r = buildShiftReport({ shift: SHIFT, labRows: [], processRows: [], findings: [] })
+    const r = buildShiftReport({ shift: SHIFT, labRows: [], processRows: [], findings: [], line: ADANI })
     expect(r.lab).toMatchObject({ n: 0, mean: null, min: null, max: null, meanError: null })
     expect(r.assessment.message).toMatch(/No laboratory C3S samples were recorded/)
     expect(r.assessment.message).not.toMatch(/Only 0/)
+  })
+})
+
+describe('buildShiftReport — numbered labels (the live format)', () => {
+  it('names the set point from the sentence when the label is only "Set point n", and still finds its tag', () => {
+    const processRows: TimestampRow[] = [{ t: ist('2026-08-27T08:00:00'), values: { [raw('D66')]: 30 } }]
+    const r = buildShiftReport({
+      shift: SHIFT,
+      labRows: [],
+      processRows,
+      line: ADANI,
+      findings: [
+        finding({ id: 'a', time: '2026-08-27T08:10:00', recommendations: [{ label: 'Set point 1', text: KILN_COAL }, { label: 'Set point 2', text: SOLID_AFR }] }),
+        finding({ id: 'b', time: '2026-08-27T10:10:00', recommendations: [{ label: 'Set point 1', text: KILN_COAL }] }),
+      ],
+    })
+    expect(r.actions.map((a) => [a.label, a.direction, a.count])).toEqual([
+      ['Kiln coal', 'decrease', 2],
+      ['Solid AFR', 'increase', 1],
+    ])
+    expect(r.actions[0].process?.key).toBe(raw('D66'))
   })
 })
 
@@ -242,6 +267,7 @@ describe('buildShiftReport — events as the insight lists them', () => {
       shift: SHIFT,
       labRows: [],
       processRows: [],
+      line: ADANI,
       findings: [
         finding({ id: 'old', time: '2026-08-27T08:00:00', invocationTime: 1 }),
         finding({ id: 'rerun', time: '2026-08-27T08:00:00', invocationTime: 2 }),
@@ -257,6 +283,7 @@ describe('buildShiftReport — events as the insight lists them', () => {
       shift: SHIFT,
       labRows: [],
       processRows: [],
+      line: ADANI,
       findings: [
         finding({ id: 'a', time: '2026-08-27T08:00:00', rootCauses: [{ label: 'Cause 1', text: recovery, severity: 'cause' }] }),
         finding({

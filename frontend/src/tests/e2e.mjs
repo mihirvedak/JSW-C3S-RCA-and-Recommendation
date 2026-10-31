@@ -413,8 +413,12 @@ await step('login gate renders', async () => {
 })
 await page.screenshot({ path: `${SHOTS}/01-login.png` })
 
-// 2 — authenticate and load
-await page.evaluate(() => localStorage.setItem('bearer_token', 'Bearer e2e-test-token'))
+// 2 — authenticate and load. The fixtures are Adani's devices, so the Adani line is selected
+// (the default for a new visitor is the first plant listed, JSW).
+await page.evaluate(() => {
+  localStorage.setItem('bearer_token', 'Bearer e2e-test-token')
+  localStorage.setItem('c3s.line', JSON.stringify({ plantId: 'adani', lineId: 'line1' }))
+})
 await page.goto(BASE, { waitUntil: 'networkidle' })
 await page.waitForTimeout(1200)
 
@@ -627,7 +631,7 @@ await step('lab quality shows the supplied parameter names and units, never a ba
   await page.locator('.lab__tab', { hasText: 'Model Outputs' }).click()
   await page.waitForTimeout(300)
   const model = await names()
-  for (const want of ['Predicted C3S', 'Actual C3S (Lab)', 'Model output parameter 1']) {
+  for (const want of ['Predicted C3S', 'Actual C3S (Lab)', 'Model Outputs & Lab C3S parameter 1']) {
     if (!model.includes(want)) throw new Error(`missing "${want}" in: ${model.join(' | ')}`)
   }
   if ((await page.locator('.unverified').count()) === 0) throw new Error('unnamed model outputs should be marked')
@@ -1573,7 +1577,7 @@ await step('process trends: one 4-column grid, no PC Outlet Temp, each with the 
     throw new Error(`filling chart should show the norm band and the 18 % flag: ${bandLabels.join(' | ')}`)
   }
   if (!(await card('cooler-flow').innerText()).includes('Sum of 12 cooler fan flows')) throw new Error('cooler flow does not say what it sums')
-  if (!(await card('D73').innerText()).includes('tag map: drop')) throw new Error('Kiln RPM should carry its tag-map grading')
+  if (!(await card('ADANI_RAW:D73').innerText()).includes('tag map: drop')) throw new Error('Kiln RPM should carry its tag-map grading')
   const cards = page.locator('.etrend__card')
   for (let i = 0; i < (await cards.count()); i++) {
     const card = cards.nth(i)
@@ -1685,10 +1689,10 @@ await step('opened from its tab, Trend Analysis shows the selected range with no
   const marks = await page.locator('.etrend__card .highcharts-plot-line-label').allTextContents()
   if (marks.some((t) => t.includes('Event'))) throw new Error(`event marked with no event open: ${marks.join(' | ')}`)
   if ((await page.getByRole('button', { name: /Event window/ }).count()) !== 0) throw new Error('event-window toggle without an event')
-  const at = await page.locator('.etrend__card[data-trend="D0"] .etrend__at').innerText()
+  const at = await page.locator('.etrend__card[data-trend="ADANI_RAW:D0"] .etrend__at').innerText()
   // The newest reading in the range, at its end: 19 Aug, 05:00 plant time.
   if (!/latest/i.test(at) || !at.includes('19 Aug, 05:00')) throw new Error(`range card should give its newest reading: ${at}`)
-  const ticks = await page.locator('.etrend__card[data-trend="D0"] .highcharts-xaxis-labels text').allTextContents()
+  const ticks = await page.locator('.etrend__card[data-trend="ADANI_RAW:D0"] .highcharts-xaxis-labels text').allTextContents()
   if (!ticks.some((t) => /^\d{1,2} Aug$/.test(t.trim()))) throw new Error(`axis should span the range: ${ticks.join(' ')}`)
 })
 
@@ -1716,7 +1720,7 @@ await step('over a range longer than 7 days, charts cover the loaded days, and a
   const foot = await page.locator('.etrend__foot').innerText()
   if (!foot.includes('its newest 7 days (from 21 Aug, 03:00)')) throw new Error(`range note: ${foot}`)
   // The fixture has process data on 18 Aug only, so the loaded week has none, and says which days it means.
-  const empty = await page.locator('.etrend__card[data-trend="D0"]').innerText()
+  const empty = await page.locator('.etrend__card[data-trend="ADANI_RAW:D0"]').innerText()
   if (!empty.includes('No readings for this trend in the newest 7 days of the range')) throw new Error(`empty card: ${empty}`)
 
   // The 18 Aug event is older than the loaded week: its own 7 days are loaded and charted.
@@ -1724,7 +1728,7 @@ await step('over a range longer than 7 days, charts cover the loaded days, and a
   await page.locator('.highcharts-plot-line-label', { hasText: 'Event 18 Aug 21:00' }).first().waitFor({ timeout: 15_000 })
   const note = await page.locator('.etrend__foot').innerText()
   if (!note.includes('the 7 days around the event (15 Aug, 09:00 – 22 Aug, 09:00)')) throw new Error(`event note: ${note}`)
-  const card = page.locator('.etrend__card[data-trend="D0"]')
+  const card = page.locator('.etrend__card[data-trend="ADANI_RAW:D0"]')
   const graph = await card.locator('.highcharts-series-0 .highcharts-graph').boundingBox()
   const lines = await card.locator('.highcharts-plot-line').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON()))
   const event = lines.find((r) => r.width <= 4 && r.height > 20)

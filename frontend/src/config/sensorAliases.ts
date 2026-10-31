@@ -1,9 +1,9 @@
 /**
- * Per-sensor name overrides — an optional layer above the supplied tag maps.
+ * Per-sensor name overrides — an optional layer above the client specs.
  *
- * Names for every ADANI_LAB tag D0–D51 and every ADANI_RAW tag D0–D123 already come from
- * the tag maps in `tagMaps.ts`. Add an entry here only to rename one sensor, or to name a
- * sensor the tag maps do not cover (the ADANI_LAB model outputs D52–D54, D56, D57).
+ * Names come from each client's spec in `config/clients/`. Add an entry here only to rename one
+ * sensor without touching the spec, or to name a tag a spec lists as unnamed (Adani's model
+ * outputs D52–D54, D56, D57).
  *
  * Keys are `DEVICE:SENSOR` (never a bare D-tag: `ADANI_LAB:D55` and `ADANI_RAW:D55` are
  * different measurements). A value replaces the label everywhere the sensor is shown — KPI

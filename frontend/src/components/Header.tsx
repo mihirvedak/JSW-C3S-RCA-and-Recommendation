@@ -5,6 +5,7 @@
 
 import { formatFull, formatStamp, formatAge } from '../lib/time'
 import { BrandLogo } from './BrandLogo'
+import { useLine } from '../config/LineContext'
 
 export function Header({
   anchorMs,
@@ -24,12 +25,14 @@ export function Header({
   /** Supplied by the caller's ticking clock so ages stay live and render stays pure. */
   now: number
 }) {
+  const line = useLine()
   return (
     <header className="appbar">
       <div className="appbar__brand">
-        <BrandLogo />
+        <BrandLogo plant={line.plant} />
         <div className="appbar__titles">
           <h1>C3S Quality Intelligence</h1>
+          <span className="appbar__plant">{line.plant.name} · {line.name}</span>
         </div>
       </div>
 

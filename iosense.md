@@ -1,4 +1,10 @@
-# IOsense API Tracking — ADANI RCA C3S
+# IOsense API Tracking — C3S RCA and Recommendation (JSW Cement, Adani Cement)
+
+> **2026-10-31 — device-configurable.** Every device, sensor, role, insight and limit now lives in
+> one client spec per plant (`frontend/src/config/clients/adani.ts`, `jsw.ts`), compiled by
+> `config/lineModel.ts`. Nothing else in `src/` names a device or a tag. See "Clients and lines"
+> and "JSW Cement" below; the Adani sections further down are unchanged and still accurate for
+> that plant.
 
 Base URL: `https://connector.iosense.io`
 Auth: `Authorization: Bearer <jwt>` (JWT already carries the `Bearer ` prefix when
@@ -52,11 +58,89 @@ so the browser is not blocked by CORS.
 
 ---
 
-## Resource IDs
+## Clients and lines (2026-10-31)
+
+Onboarding a plant is one file in `frontend/src/config/clients/`:
+
+| Part of the spec | What it carries | Where it is used |
+|---|---|---|
+| `devices[]` | Each device: id, `kind` (`lab` sparse / `process` dense), display label, groups, named sensors (id, name, unit, group, meaning, quality) | Fetch strategy (#3: lab devices one request per week, process devices chunked / thinned / capped), lab grid, process list, every label |
+| `roles` | Which `(device, sensor)` is the predicted C3S, lab C3S, free lime, kiln feed, kiln / PC / low-NOx coal, AFR, kiln speed, BZT, SAT, TAD, O2, LSF…, coal / AFR ash and NCV | Newest-sample probe (#2), C3S trend, zones, 48-h timeline, RCA parameter mapping, kiln trends, shift set points, spec rows |
+| `insightId` | The RCA / recommendation insight | #4 |
+| `hidden`, `trendExcluded` | Tags listed but not shown / not charted | Lab grid, Trend Analysis |
+| `kilnFilling` | The plant's filling-degree formula anchor, norm band, flag | Trend Analysis (needs `kilnFeed` + `kilnRpm`) |
+| `specLimits`, `binLimits` | Plant LSL / USL per lab parameter; the kiln-feed bin table for process parameters | Executive View compliance |
+| `shifts`, `predictedC3SMax`, `outputs`, `notes` | Shift pattern (default A/B/C), plausibility cap, what the model writes, open points | Shift reports; #2/#3 filtering; documentation |
+| `PlantSpec`: `brand`, `dataEnd`, `shcOptimizerUrl` | Logo or wordmark, data cut-off, SHC Optimizer link | Header, every load, recommendations |
+
+Rows are keyed `DEVICE:SENSOR` everywhere above the device routes (`services/lineDataService.ts`
+merges the devices of a line), so same-numbered tags on different devices never collide. A spec
+that names an unlisted sensor as a role, or lacks one of the three required roles (predicted C3S,
+lab C3S, free lime), fails at start-up. A role a plant has not mapped switches that feature off
+with a message, never a wrong figure.
+
+---
+
+## JSW Cement, Nandyal — Kiln line (configured 2026-10-31)
+
+From the tag list supplied 2026-10-31. **Not yet verified against the live platform: no session
+token for the JSW account was available.** `npm run test:e2e:jsw` (`frontend/src/tests/e2e-jsw.mjs`)
+drives the line in a browser against a simulated platform (synthetic rows on all nine devices, the
+insight in the Adani result schema) and passes with no console errors: every device is requested
+and no Adani one, the newest-sample probe asks `JSW_C3S:D7` and `FLSCLINKER:D18`, the three `D18`s
+stay apart, the compliance table judges C3S / free lime against the insight bands and says why
+process rows are absent, Trend Analysis shows the two coal trends only, and switching the plant
+selector to Adani rescopes every request. The items under "To verify" are what a live run must
+confirm. Running the simulation also caught one real setting: Adani's plausibility cap (predicted
+C3S above 50 % is dropped) would have discarded Nandyal's Bogue C3S (~60 %), so the cap is now per
+line (`predictedC3SMax`, JSW 80 %).
+
+| Resource | ID | Read as | Role(s) |
+|---|---|---|---|
+| Clinker XRD/XRF | `FLSCLINKER` D18 lab C3S, D24 free lime, D19 SO3 | lab | `actualC3S`, `freeLime`, `clinkerSO3` |
+| Kiln feed XRF | `FLSKILNFEED` D14 CaO, D7 SiO2, D8 Al2O3, D13 Fe2O3, D214 LOI | lab | `rawMeal*` (Bogue K0, dry-basis factor) |
+| Fuel lab | `JSWCOAL_A1` D12 kiln-coal ash, D17 PC-coal ash, D22 AFR NCV | lab | `coalAsh`, `pcCoalAsh`, `afrNcv` |
+| Bomb calorimeters | `JSWBMBCLRMTR_KC` D18, `JSWBMBCLRMTR_PC` D18 | lab | `coalNcv`, `pcCoalNcv` (historical RCA only; defaults 5100 / AFR 3100 until cached) |
+| Model outputs | `JSW_C3S` D0–D8 (writers JSW_S5 physics, JSW_S9 Bogue + Ridge), MQTT `devicesIn/JSW_C3S/data` | lab | `predictedC3S` = **D7**; D5 (old physics C3S) listed but hidden |
+| Kiln DCS | `ABBKLN_A1` D154 kiln coal, D155 PC coal, D156 low-NOx coal (t/h) | process | `kilnCoal`, `pcCoal`, `lowNoxCoal` |
+| Preheater DCS | `ABBBHPH_A1` D63 kiln feed (t/h) | process | `kilnFeed` |
+| AFR feeding | `ABBKLNAFRSGC_A1` D2 solid AFR (t/h) | process | `solidAfr` |
+| RCA insight | `INS_c3snandyalrca` | #4 | — |
+
+Three `D18`s (clinker C3S, two NCVs) and two `D7`s (raw-meal SiO2, predicted C3S) exist on this
+line; the key scheme keeps them apart (unit-tested, browser-tested).
+
+**What the dashboard shows for JSW with this list, and what it does not:**
+
+| Feature | State |
+|---|---|
+| C3S trend, histogram, 48-h timeline, zone plots, RCA panel, recommendations, shift reports | On (predicted `JSW_C3S:D7`, lab `FLSCLINKER:D18`, free lime `FLSCLINKER:D24`) |
+| Compliance, lab rows | C3S (actual, predicted) and free lime only, judged against the **RCA insight's own target bands** (shown as the basis) until plant LSL / USL are supplied |
+| Compliance, process rows | **Off** — no kiln-feed bin limit table; the table says so |
+| Kiln-operation trends | Only PC coal and kiln coal; **no BZT, SAT, TAD, kiln inlet O2, kiln speed, cooler flow, filling degree** (no tags) |
+| RCA-named parameters | Fuel rates, kiln feed, fuel ash, NCV, free lime, raw-meal oxides resolve; **LSF / raw-mix / air-side / kiln-speed mentions resolve to nothing** (no tags) |
+| Data cut-off | None (loads to the newest sample) |
+| SHC Optimizer link | "Not configured for JSW Cement" until `shcOptimizerUrl` is set |
+| Brand | Wordmark "JSW Cement" until a logo file is supplied |
+
+**To verify / still needed from the plant (the open questions):**
+
+1. **Devices, sensors.** Confirm the device of "Low-NOx ash used": the list says `JSW_S5` (the writer); it is read here as `JSW_C3S:D2`. Confirm `D214` on `FLSKILNFEED` (the only three-digit tag on a lab device). Confirm the nine devices are in the dashboard account (the Adani devices were readable only because #2/#3 are not account-scoped).
+2. **Kiln operation tags** (needed for the kiln trends, filling degree, RCA air-side mapping, bin compliance): kiln speed (rpm), burning zone temperature, secondary air temperature, tertiary air temperature, kiln inlet O2 and temperature, PC outlet temperature, cooler grate speed, cooler fan flows — device + sensor each.
+3. **Laboratory tags not in the list:** kiln feed LSF / SM / AM (the RCA names LSF; only the oxides were given — LSF could be computed from them, but the plant's own figure is preferred), raw-mix moduli, AFR ash (furnace), clinker SiO2 / Al2O3 / Fe2O3 / CaO / MgO, hot meal.
+4. **Insight schema.** Does `INS_c3snandyalrca` return the same `result.rca` fields as `INS_df1b3c1a11de` (`time`, `c3s`, `fcao`, `zone`, `targets`, `lime_level_definition`, `root_cause{}`, `recommendations{}`, shift summaries with `kind: "shift"`)? The parser is schema-driven and tolerant, but zones and targets need those fields. Are its times plant-local like Adani's?
+5. **Limits.** Plant LSL / USL (with their basis) for C3S, free lime, ash, NCV and the raw-meal oxides; and, if a golden-period limit table per kiln-feed bin exists for Nandyal, that table (its bins, the Adani edges 370–565 t/h do not apply).
+6. **Kiln filling degree:** the plant's anchor (feed, rpm, %) and norm / flag levels, once a kiln speed tag exists.
+7. **Operations:** shift pattern (A/B/C 06/14/22 assumed), SHC Optimizer URL, logo file, any data cut-off, and the prediction cadence of `JSW_C3S:D7` (the ±15 min match tolerance assumes a 15-minute cycle).
+8. **Output tags.** The dashboard only reads; `JSW_C3S` D0–D8 are listed under "Model Outputs" for inspection. Nothing publishes to `devicesIn/JSW_C3S/data` from here.
+
+---
+
+## Resource IDs (Adani)
 
 | Resource | ID | Status |
 |---|---|---|
-| Lab / quality device | `ADANI_LAB` | Reachable via #2/#3. Sensors `D0`–`D58` carry data; `D59`+ empty. |
+| Lab / quality device | `ADANI_LAB` | Reachable via #2/#3. Sensors `D0`–`D58` carry data; `D59`+ empty. Spec: `config/clients/adani.ts` |
 | Process device | `ADANI_RAW` | Reachable via #2/#3. Sensors `D0`–`D65` carry data. |
 | RCA insight | `INS_df1b3c1a11de` | Reachable via #4. 579 results, `resultName: "C3S RCA Action"` (re-generated 2026-10-22; see "RCA insight schema"). |
 
@@ -299,10 +383,9 @@ predicted vs actual C3S + last RCA events; right: Root Cause Analysis over Recom
 laboratory quality (last vs previous) → process monitoring. (The "Last 4 Days Parameter Analysis"
 panel was removed on 2026-10-28; process compliance by kiln-feed bin is on the Executive View.)
 
-**Plant and line** (`frontend/src/config/plants.ts`): each line names its lab device, process
-device and RCA insight; every fetch (#2, #3, #4) is scoped to the selected line. Only Line 1
-(`ADANI_LAB`, `ADANI_RAW`, `INS_df1b3c1a11de`) is configured; no other line is offered until its IDs
-are known.
+**Plant and line** (`frontend/src/config/plants.ts`): each line's client spec names its devices,
+roles and RCA insight; every fetch (#2, #3, #4) is scoped to the selected line. Configured: JSW
+Cement / Kiln line (default) and Adani Cement / Line 1.
 
 **Classification colours** (`frontend/src/lib/zones.ts`, the single source): Good clinker green,
 Overlimed orange, Under burnt light blue, Overburnt dark blue, Undetermined yellow, plus
@@ -336,6 +419,9 @@ Shifts with no deviations may have no summary (they can be deleted with
 
 - **Never read as events.** `isShiftResult()` in `services/rcaService.ts` separates them on any
   of the three markers; they are not findings, not "unparseable", and not in the event total.
+- **Numbered labels (2026-10-31).** In the live format a set-point recommendation is keyed "Set point n"
+  and names the set point in the sentence; shift reports now group by the set point parsed from the
+  sentence ("Kiln coal"), not by the number, so the report reads "Reduce Kiln coal" and finds its tag.
 - **Executive View, Last Two Completed Shifts.** Each shift shows only its name and time, the
   root cause analysis and the complete recommendations (`components/ShiftRecommendations.tsx`):
   - RCA: the causes the summary names itself, else the drivers named by the shift's RCA events
@@ -372,7 +458,7 @@ Executive View → Specification Compliance is one table, columns **Parameter | 
 
 | Item | Detail |
 |---|---|
-| Limits | `config/binLimits.ts`, copied from `adani_lsl_usl_K05_round5.json` (Adani Maratha, generated 2026-10-27): LSL / USL / target / status per parameter per bin. LSL/USL = mean ± 1 sd of each bin's golden period |
+| Limits | `config/clients/adaniBinLimits.ts` (the Adani spec's `binLimits`), copied from `adani_lsl_usl_K05_round5.json` (Adani Maratha, generated 2026-10-27): LSL / USL / target / status per parameter per bin. LSL/USL = mean ± 1 sd of each bin's golden period |
 | Bins | Kiln feed `MT.431-FM1.F4:PV` = ADANI_RAW D74: 370–440, 440–460, 460–480, 480–500, 500–520, 520–565 t/h |
 | Mapping | File parameter names → ADANI_RAW tags by tag-map label (unit-tested: every name maps) |
 | Calculation | Each process reading is paired with the kiln feed in the same row and judged against that bin's LSL–USL. Below / within / above % = count / judged, over all bins. Not judged: feed missing or outside 370–565, or no limit for that bin |
@@ -391,7 +477,7 @@ Executive View → Specification Compliance is one table, columns **Parameter | 
 ## Data cut-off (2026-10-28)
 
 At the plant's request nothing after **28 Aug 2026, 03:00 plant time** is loaded
-(`frontend/src/config/dataWindow.ts`, env `VITE_DATA_END`, `"none"` to disable):
+(`PlantSpec.dataEnd` in `config/clients/adani.ts`, applied by `config/dataWindow.ts`; env `VITE_DATA_END` overrides every plant, `"none"` to disable):
 
 - `fetchRange` (#3, every lab and process load) clips its end at the cut-off, skips a window wholly
   after it without calling the platform, and drops any returned row after it.
@@ -403,7 +489,7 @@ At the plant's request nothing after **28 Aug 2026, 03:00 plant time** is loaded
 ## Impossible readings (2026-10-29)
 
 Predicted C3S (`D55` on each line's lab device, e.g. `ADANI_LAB`) above **50 %** is dropped as it is
-read (`frontend/src/config/validRanges.ts`, applied in `fetchRange` #3 and `fetchLatest` #2). It is treated as a
+read (`LineModel.isImplausible`, `predictedC3SMax` on the line spec, applied in `services/lineDataService.ts` on every #2 / #3 result). It is treated as a
 missing prediction everywhere: C3S trend, histogram, compliance, zone plots, 48-hour timeline, shift
 figures. `ADANI_RAW:D55` is a different tag and is not affected.
 

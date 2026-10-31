@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { relevantParameters } from '../config/rcaParameters'
-import { LAB_TAGS, RAW_TAGS } from '../config/tagMaps'
 import { contextWindow, lastSamples, spliceRows, trendWindow, valueAt } from '../lib/eventTrends'
 import type { TimestampRow } from '../lib/series'
 import { HOUR_MS, MINUTE_MS } from '../lib/time'
 import type { RcaFinding } from '../services/rcaService'
+import { ADANI, JSW, lab, raw } from './lines'
 
 function finding(over: Partial<RcaFinding>): RcaFinding {
   return {
@@ -35,8 +35,9 @@ function finding(over: Partial<RcaFinding>): RcaFinding {
 }
 
 const cause = (label: string, text = '') => ({ label, text, severity: null })
-const names = (ps: Array<{ devID: string; sensorId: string }>) =>
-  ps.map((p) => (p.devID === 'ADANI_RAW' ? RAW_TAGS[p.sensorId]?.label : LAB_TAGS[p.sensorId]?.label ?? p.sensorId))
+/** Labels as the Adani tag maps give them; the two C3S series by their sensor id. */
+const names = (ps: Array<{ key: string; sensorId: string }>) =>
+  ps.map((p) => (p.key === lab('D55') || p.key === lab('D58') ? p.sensorId : ADANI.label(p.key)))
 
 describe('relevantParameters', () => {
   // Labels as INS_df1b3c1a11de returned them for result 6adee6b96ef9b41b70f92fa7 (zone format).
@@ -60,7 +61,7 @@ describe('relevantParameters', () => {
   })
 
   it('maps the zone format to the process tags it names, by tag-map name', () => {
-    expect(names(relevantParameters(overlimed).process)).toEqual([
+    expect(names(relevantParameters(overlimed, ADANI).process)).toEqual([
       'Solid AFR',
       'Kiln Coal',
       'PC Coal',
@@ -69,7 +70,7 @@ describe('relevantParameters', () => {
   })
 
   it('leads the lab list with predicted then actual C3S, and adds the lab quantities named', () => {
-    expect(names(relevantParameters(overlimed).lab)).toEqual([
+    expect(names(relevantParameters(overlimed, ADANI).lab)).toEqual([
       'D55',
       'D58',
       'Clinker Free CaO',
@@ -83,7 +84,7 @@ describe('relevantParameters', () => {
   })
 
   it('records why each tag is shown', () => {
-    const kilnCoal = relevantParameters(overlimed).process.find((p) => p.sensorId === 'D66')
+    const kilnCoal = relevantParameters(overlimed, ADANI).process.find((p) => p.key === raw('D66'))
     expect(kilnCoal?.sources).toEqual([
       'Root cause: TSR low',
       'Root cause: Kiln coal high',
@@ -95,7 +96,7 @@ describe('relevantParameters', () => {
   })
 
   it('reads "Kiln feed LSF" as the lab LSF, not the kiln feed rate', () => {
-    const p = relevantParameters(finding({ rootCauses: [cause('Kiln feed LSF')] }))
+    const p = relevantParameters(finding({ rootCauses: [cause('Kiln feed LSF')] }), ADANI)
     expect(p.process).toEqual([])
     expect(names(p.lab)).toContain('Kiln feed LSF')
   })
@@ -103,14 +104,35 @@ describe('relevantParameters', () => {
   it('ignores a recommendation that advises no change', () => {
     const p = relevantParameters(
       finding({ recommendations: [{ label: 'Raw mix', text: 'No proportions advised (material balance does not close).' }] }),
+      ADANI,
     )
     expect(p.lab.map((x) => x.sensorId)).toEqual(['D55', 'D58'])
   })
 
   it('maps an unburnt zone to burning-zone temperature and free lime', () => {
-    const p = relevantParameters(finding({ zone: 'Unburnt' }))
+    const p = relevantParameters(finding({ zone: 'Unburnt' }), ADANI)
     expect(names(p.process)).toEqual(['Burning Zone Temp'])
     expect(names(p.lab)).toContain('Clinker Free CaO')
+  })
+
+  it('resolves the same wording to another line\'s tags, skipping the roles it has not mapped', () => {
+    const p = relevantParameters(overlimed, JSW)
+    // JSW has no LSF or raw-mix tags, so those mentions bring nothing in; the fuel tags resolve.
+    expect(p.process.map((x) => x.key)).toEqual(['ABBKLNAFRSGC_A1:D2', 'ABBKLN_A1:D154', 'ABBKLN_A1:D155', 'ABBKLN_A1:D156', 'ABBBHPH_A1:D63'])
+    expect(p.lab.map((x) => x.key)).toEqual(['JSW_C3S:D7', 'FLSCLINKER:D18', 'FLSCLINKER:D24', 'JSWCOAL_A1:D12', 'JSWCOAL_A1:D17'])
+    // The reason each tag is shown travels with it.
+    expect(p.process.find((x) => x.key === 'ABBKLN_A1:D156')?.sources).toEqual([
+      'Root cause: TSR low',
+      'Root cause: Coal per t clinker low',
+      'Root cause: Fuel ash high',
+      'Root cause: Ash fed',
+    ])
+  })
+
+  it('maps the unburnt zone on JSW to free lime alone, having no burning-zone tag', () => {
+    const p = relevantParameters(finding({ zone: 'Unburnt' }), JSW)
+    expect(p.process).toEqual([])
+    expect(p.lab.map((x) => x.key)).toEqual(['JSW_C3S:D7', 'FLSCLINKER:D18', 'FLSCLINKER:D24'])
   })
 })
 
@@ -128,7 +150,7 @@ describe('event windows and samples', () => {
     { t: t - 3 * HOUR_MS, values: { D58: 44 } },
     { t, values: { D58: 45 } },
     { t: t + 10 * MINUTE_MS, values: { D58: 99 } },
-  ]
+  ] // bare keys: lastSamples is key-agnostic
 
   it('takes the last four samples at or before the event, newest first', () => {
     expect(lastSamples(rows, 'D58', t).map((p) => p.v)).toEqual([45, 44, 43, 42])

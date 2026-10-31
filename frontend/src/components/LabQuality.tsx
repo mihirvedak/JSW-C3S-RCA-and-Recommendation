@@ -1,44 +1,26 @@
 /**
- * Laboratory quality intelligence — ADANI_LAB, organised by material category.
+ * Laboratory quality intelligence — the line's laboratory-type devices, organised by material
+ * group (the groups the client spec gives its sensors: raw mix, kiln feed, clinker, fuel, model
+ * outputs …).
  *
  * Each parameter shows its latest value against the previous sample (last vs previous), the
- * original laboratory sample timestamp and a data-quality state. Sampling cadence differs sharply between categories (oxides every
- * ~2 h, hot meal twice a day, AFR about once a day) and that is surfaced rather than
- * smoothed away. Nothing is forward-filled.
+ * original laboratory sample timestamp and a data-quality state. Sampling cadence differs sharply
+ * between groups (oxides every ~2 h, hot meal twice a day, AFR about once a day) and that is
+ * surfaced rather than smoothed away. Nothing is forward-filled.
  */
 
 import { useMemo, useState } from 'react'
-import {
-  HIDDEN_LAB_SENSORS,
-  LAB_CATEGORY_LABELS,
-  LAB_DEVICE,
-  LAB_SENSORS_BY_CATEGORY,
-} from '../config/deviceMappings'
-import type { LabCategory, LabSensorDef } from '../config/deviceMappings'
+import { useLine } from '../config/LineContext'
+import type { SensorDef, SensorGroup } from '../config/lineModel'
 import type { LastReading } from '../services/deviceDataService'
 import type { Point, TimestampRow } from '../lib/series'
 import { NoData, UnverifiedName } from './primitives'
 import { formatAge, formatFull, HOUR_MS } from '../lib/time'
 
-/** A category's parameters, without the ones the dashboard does not show. */
-const shown = (cat: LabCategory) =>
-  (LAB_SENSORS_BY_CATEGORY[cat] ?? []).filter((s) => !HIDDEN_LAB_SENSORS.has(s.sensorId))
-
-const CATEGORY_ORDER: LabCategory[] = [
-  'raw_mix',
-  'kiln_feed',
-  'hot_meal_1',
-  'hot_meal_2',
-  'clinker',
-  'coal',
-  'afr',
-  'model_output',
-]
-
 /** A reading older than this relative to the newest lab sample is flagged stale. */
 const STALE_FACTOR_MS = 6 * HOUR_MS
 
-/** The sample before the latest one, per sensor, within the loaded rows. */
+/** The sample before the latest one, per sensor key, within the loaded rows. */
 function previousSamples(rows: readonly TimestampRow[]): Map<string, Point> {
   const last = new Map<string, Point>()
   const prev = new Map<string, Point>()
@@ -61,7 +43,7 @@ function Cell({
   newestLabSample,
   now,
 }: {
-  sensor: LabSensorDef
+  sensor: SensorDef
   reading: LastReading | undefined
   previous: Point | undefined
   newestLabSample: number | null
@@ -73,7 +55,7 @@ function Cell({
     time != null && newestLabSample != null && newestLabSample - time > STALE_FACTOR_MS
 
   return (
-    <article className={`lab-cell ${stale ? 'is-stale' : ''}`} title={`${LAB_DEVICE}:${sensor.sensorId}`}>
+    <article className={`lab-cell ${stale ? 'is-stale' : ''}`} title={sensor.key}>
       <header className="lab-cell__head">
         <span className="lab-cell__name">
           {sensor.label}
@@ -129,7 +111,10 @@ export function LabQuality({
   rows: readonly TimestampRow[]
   now: number
 }) {
-  const [active, setActive] = useState<LabCategory>('raw_mix')
+  const line = useLine()
+  const groups: SensorGroup[] = useMemo(() => line.groups('lab'), [line])
+  const [picked, setPicked] = useState<string | null>(null)
+  const active = groups.find((g) => g.id === picked) ?? groups[0]
   const previous = useMemo(() => previousSamples(rows), [rows])
 
   const newestLabSample = useMemo(() => {
@@ -140,46 +125,38 @@ export function LabQuality({
     return newest
   }, [latest])
 
-  const sensors = shown(active)
-  const visible = sensors
+  if (!active) return <p className="lab__empty">This line lists no laboratory parameters.</p>
 
   return (
     <div className="lab">
       <div className="lab__tabs" role="tablist" aria-label="Material category">
-        {CATEGORY_ORDER.map((cat) => {
-          const list = shown(cat)
-          return (
-            <button
-              key={cat}
-              type="button"
-              role="tab"
-              aria-selected={active === cat}
-              className={`lab__tab ${active === cat ? 'is-active' : ''}`}
-              onClick={() => setActive(cat)}
-            >
-              <span className="lab__tab-name">{LAB_CATEGORY_LABELS[cat]}</span>
-              <span className="lab__tab-range">{list.length} parameters</span>
-            </button>
-          )
-        })}
+        {groups.map((g) => (
+          <button
+            key={g.id}
+            type="button"
+            role="tab"
+            aria-selected={active.id === g.id}
+            className={`lab__tab ${active.id === g.id ? 'is-active' : ''}`}
+            onClick={() => setPicked(g.id)}
+          >
+            <span className="lab__tab-name">{g.label}</span>
+            <span className="lab__tab-range">{g.sensors.length} parameters</span>
+          </button>
+        ))}
       </div>
 
-      {visible.length === 0 ? (
-        <p className="lab__empty">No parameters to show in this category.</p>
-      ) : (
-        <div className="lab__grid">
-          {visible.map((s) => (
-            <Cell
-              key={s.sensorId}
-              sensor={s}
-              reading={latest.get(s.sensorId)}
-              previous={previous.get(s.sensorId)}
-              newestLabSample={newestLabSample}
-              now={now}
-            />
-          ))}
-        </div>
-      )}
+      <div className="lab__grid">
+        {active.sensors.map((s) => (
+          <Cell
+            key={s.key}
+            sensor={s}
+            reading={latest.get(s.key)}
+            previous={previous.get(s.key)}
+            newestLabSample={newestLabSample}
+            now={now}
+          />
+        ))}
+      </div>
     </div>
   )
 }

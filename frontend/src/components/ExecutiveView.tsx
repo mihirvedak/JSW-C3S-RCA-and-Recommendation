@@ -17,25 +17,17 @@ import { lazy, Suspense, useMemo, useState } from 'react'
 import { Badge, EmptyState, LoadingState, Panel } from './primitives'
 import { ComplianceTable } from './ComplianceTable'
 import type { ComplianceRow } from '../lib/compliance'
-import { BIN_PARAMETERS, binLimitTags } from '../config/binLimits'
 import { binCompliance } from '../lib/binCompliance'
 import type { BinStatus } from '../lib/binCompliance'
 import { ShiftRecommendations } from './ShiftRecommendations'
-import { SPEC_ROWS } from '../config/specLimits'
-import {
-  ACTUAL_C3S,
-  LAB_DEVICE,
-  PREDICTED_C3S,
-  PROCESS_DEVICE,
-  getSensor,
-  sensorLabel,
-} from '../config/deviceMappings'
+import { specRows } from '../config/specLimits'
+import { refKey } from '../config/lineModel'
+import type { ClinkerTargets } from '../services/rcaService'
 import { compliance, limitsAreOrdered } from '../lib/compliance'
 import { histogramSet } from '../lib/histogram'
 import { extractSeries } from '../lib/series'
 import { formatFull } from '../lib/time'
 import { lastCompletedShifts, useShiftReports } from '../hooks/useShiftReports'
-import { SHIFTS } from '../config/shifts'
 import { formatDay, rcaDays } from '../lib/rcaDays'
 import { clampEnd } from '../config/dataWindow'
 import { PROCESS_THIN_ABOVE_MS } from '../hooks/useDashboardData'
@@ -51,9 +43,9 @@ const C3SHistogram = lazy(() =>
 
 type Dataset = 'actual' | 'predicted'
 
-const DATASETS: ReadonlyArray<{ id: Dataset; label: string; color: string; sensorId: string }> = [
-  { id: 'actual', label: 'Actual', color: '#1f6fd0', sensorId: ACTUAL_C3S },
-  { id: 'predicted', label: 'Predicted', color: '#0f9b74', sensorId: PREDICTED_C3S },
+const DATASETS: ReadonlyArray<{ id: Dataset; label: string; color: string }> = [
+  { id: 'actual', label: 'Actual', color: '#1f6fd0' },
+  { id: 'predicted', label: 'Predicted', color: '#0f9b74' },
 ]
 
 /** One-point bins normally; half-point bins when the data spans only a few points. */
@@ -65,7 +57,8 @@ function binWidthFor(values: readonly number[]): number {
 
 const noop = () => {}
 
-export function ExecutiveView({ d, now }: { d: DashboardData; now: number }) {
+export function ExecutiveView({ d, now, targets }: { d: DashboardData; now: number; targets: ClinkerTargets | null }) {
+  const line = d.line
   const [dataset, setDataset] = useState<Dataset>('actual')
 
   /* ---------------- histogram ---------------- */
@@ -78,7 +71,7 @@ export function ExecutiveView({ d, now }: { d: DashboardData; now: number }) {
 
   const active = DATASETS.find((x) => x.id === dataset) as (typeof DATASETS)[number]
   const activeHist = hist[dataset]
-  const seriesName = sensorLabel(LAB_DEVICE, active.sensorId)
+  const seriesName = line.label(dataset === 'actual' ? line.actualC3S : line.predictedC3S)
 
   /* ---------------- compliance ---------------- */
 
@@ -97,15 +90,15 @@ export function ExecutiveView({ d, now }: { d: DashboardData; now: number }) {
     const fmt = (v: number | null) => (v == null ? '—' : String(v))
 
     // Laboratory parameters: one fixed LSL / USL each (config/specLimits.ts).
-    const lab = SPEC_ROWS.map((r): ComplianceRow => {
-      const values = extractSeries(d.labRows, r.sensorId).map((p) => p.v)
-      const unit = getSensor(r.devID, r.sensorId)?.unit ?? null
+    const lab = specRows(line, targets).map((r): ComplianceRow => {
+      const values = extractSeries(d.labRows, r.key).map((p) => p.v)
+      const unit = line.unit(r.key)
       const ordered = limitsAreOrdered(r)
       // An LSL above the USL is a configuration mistake: classify nothing rather than guess.
       const c = compliance(values, ordered ? r : { lsl: null, usl: null })
       return {
-        key: `${r.devID}:${r.sensorId}`,
-        label: sensorLabel(r.devID, r.sensorId),
+        key: r.key,
+        label: line.label(r.key),
         limitsText: `LSL ${fmt(r.lsl)} · USL ${fmt(r.usl)}${unit ? ` ${unit}` : ''}${r.basis ? ` · ${r.basis}` : ''}`,
         countText: `${c.n} sample${c.n === 1 ? '' : 's'}`,
         below: c.below,
@@ -122,23 +115,24 @@ export function ExecutiveView({ d, now }: { d: DashboardData; now: number }) {
       }
     })
 
-    // Process parameters: each reading against the limits of its kiln-feed bin (config/binLimits.ts).
-    const tags = binLimitTags()
+    // Process parameters: each reading against the limits of its kiln-feed bin (the line's table).
+    const bins = line.binLimits
+    const binKey = bins ? line.role(bins.binRole) : null
+    const edges = bins ? `${bins.bins[0].min}–${bins.bins[bins.bins.length - 1].max} t/h` : ''
     const MESSAGE: Partial<Record<BinStatus, string>> = {
       nolimits: 'No limits in the table',
       nodata: 'No readings in the selected range',
-      unjudged: 'No reading at a binned kiln feed (370–565 t/h)',
+      unjudged: `No reading at a binned kiln feed (${edges})`,
       units: 'Units may not match the limit table',
     }
-    const process = BIN_PARAMETERS.flatMap((name): ComplianceRow[] => {
-      const id = tags.get(name)
-      if (!id) return []
-      const unit = getSensor(PROCESS_DEVICE, id)?.unit ?? null
-      const r = binCompliance(d.processRows, name, id)
+    const process = (bins && binKey ? bins.parameters : []).flatMap(({ name, ref }): ComplianceRow[] => {
+      const key = refKey(ref)
+      const unit = line.unit(key)
+      const r = binCompliance(d.processRows, bins!, name, key, binKey!)
       const graded = r.grade && r.grade !== 'USABLE' ? ` · table: ${r.grade.toLowerCase()}` : ''
       return [
         {
-          key: `${PROCESS_DEVICE}:${id}`,
+          key,
           label: name,
           limitsText: `LSL – USL of the kiln-feed bin${unit ? ` (${unit})` : ''}${graded}`,
           countText: `${r.judged} reading${r.judged === 1 ? '' : 's'} judged${r.notJudged ? ` · ${r.notJudged} not judged` : ''}`,
@@ -155,15 +149,15 @@ export function ExecutiveView({ d, now }: { d: DashboardData; now: number }) {
       ]
     })
     return [...lab, ...process]
-  }, [d.labRows, d.processRows, processNote, d.processLoading, d.processError])
+  }, [line, targets, d.labRows, d.processRows, processNote, d.processLoading, d.processError])
 
   /* ---------------- shifts ---------------- */
 
   // The dropdown offers the days on which the insight produced RCA events or shift summaries.
-  const days = useMemo(() => rcaDays(SHIFTS, d.rcaAll, d.rcaShifts), [d.rcaAll, d.rcaShifts])
+  const days = useMemo(() => rcaDays(line.shifts, d.rcaAll, d.rcaShifts), [line.shifts, d.rcaAll, d.rcaShifts])
   const [shiftDay, setShiftDay] = useState<string>('last')
   const picked = shiftDay === 'last' ? null : (days.find((x) => x.key === shiftDay) ?? null)
-  const lastShifts = useMemo(() => lastCompletedShifts(d.windowEnd, now), [d.windowEnd, now])
+  const lastShifts = useMemo(() => lastCompletedShifts(line.shifts, d.windowEnd, now), [line.shifts, d.windowEnd, now])
   // A picked day shows its completed shifts that hold RCA content, in the order they ran.
   const dayShifts = useMemo(
     () => (picked ? [...picked.shifts.values()].filter((w) => w.end <= clampEnd(now)).sort((a, b) => a.start - b.start) : null),
@@ -236,7 +230,15 @@ export function ExecutiveView({ d, now }: { d: DashboardData; now: number }) {
           {d.labLoading ? (
             <LoadingState message="Loading laboratory readings…" />
           ) : (
-            <ComplianceTable rows={rows} />
+            <>
+              <ComplianceTable rows={rows} thresholds={line.binLimits?.thresholds ?? null} />
+              {line.binLimits == null ? (
+                <p className="muted small">
+                  No kiln-feed bin limit table is configured for {line.plant.name}, so no process parameter is
+                  judged here. Laboratory rows without plant limits use the RCA insight&rsquo;s own target bands.
+                </p>
+              ) : null}
+            </>
           )}
         </Panel>
       </div>

@@ -9,8 +9,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { LineConfig } from '../config/plants'
-import { PROCESS_THIN_MS, fetchRangeChunked } from '../services/deviceDataService'
+import type { LineModel } from '../config/lineModel'
+import { PROCESS_THIN_MS } from '../services/deviceDataService'
+import { fetchDevicesRangeChunked } from '../services/lineDataService'
 import { AuthError } from '../services/apiClient'
 import type { TimestampRow } from '../lib/series'
 import type { EventWindow } from '../lib/eventTrends'
@@ -33,11 +34,11 @@ function toSectionError(err: unknown): SectionError {
 }
 
 /** `w` null means nothing to load: no event open, or the event is inside the loaded data. */
-export function useEventContext(w: EventWindow | null, line: LineConfig): EventContext {
-  const { processDevice } = line
+export function useEventContext(w: EventWindow | null, line: LineModel): EventContext {
+  const lineKey = `${line.plant.id}/${line.id}`
   const start = w?.start ?? null
   const end = w?.end ?? null
-  const key = start == null || end == null ? null : `${processDevice}|${start}|${end}`
+  const key = start == null || end == null ? null : `${lineKey}|${start}|${end}`
   const cache = useRef(new Map<string, TimestampRow[]>())
   const [entry, setEntry] = useState<{ key: string; rows: TimestampRow[]; error: SectionError | null } | null>(null)
   const [nonce, setNonce] = useState(0)
@@ -50,7 +51,7 @@ export function useEventContext(w: EventWindow | null, line: LineConfig): EventC
       return
     }
     const controller = new AbortController()
-    fetchRangeChunked(processDevice, start, end, {
+    fetchDevicesRangeChunked(line, line.processDevices, start, end, {
       chunkMs: processChunkMs(end - start),
       thinMs: PROCESS_THIN_MS,
       signal: controller.signal,
@@ -66,7 +67,8 @@ export function useEventContext(w: EventWindow | null, line: LineConfig): EventC
         setEntry({ key, rows: [], error: toSectionError(err) })
       })
     return () => controller.abort()
-  }, [key, start, end, processDevice, nonce])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `line` is identified by key
+  }, [key, start, end, nonce])
 
   const reload = useCallback(() => {
     if (key != null) cache.current.delete(key)

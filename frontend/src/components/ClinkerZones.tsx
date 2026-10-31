@@ -1,9 +1,8 @@
 /**
  * Actual and predicted C3S against free lime, over the clinker zones.
  *
- *   - Actual: laboratory C3S (ADANI_LAB:D58, Actual C3S (Lab)) against the free lime of the
- *     same sample (D43). The dashboard reports C3S as actual (D58) and predicted (D55) only.
- *   - Predicted: predicted C3S (D55) against the free lime of the last usable laboratory
+ *   - Actual: the line's laboratory C3S against the free lime of the same sample.
+ *   - Predicted: the line's predicted C3S against the free lime of the last usable laboratory
  *     sample, since free lime itself is not predicted.
  *
  * Both use the insight's targets. RCA events are triggered on predicted C3S: the insight's
@@ -16,13 +15,7 @@ import type { ClinkerTargets, RcaFinding } from '../services/rcaService'
 import type { TimestampRow } from '../lib/series'
 import { pairActual, pairPredicted, LAST_USABLE_LAB_MS, SAME_SAMPLE_MS } from '../lib/clinkerZones'
 import { extractSeries } from '../lib/series'
-import {
-  ACTUAL_C3S,
-  CLINKER_FREE_LIME,
-  LAB_DEVICE,
-  PREDICTED_C3S,
-  sensorLabel,
-} from '../config/deviceMappings'
+import { useLine } from '../config/LineContext'
 import { formatDateTime, HOUR_MS, MINUTE_MS } from '../lib/time'
 import { ClinkerZoneChart } from './ClinkerZoneChart'
 import { EmptyState } from './primitives'
@@ -39,15 +32,19 @@ export function ClinkerZones({
   /** What `rows` cover, for the caption, e.g. "the 96 h up to the event". */
   scope: string
 }) {
-  const actual = useMemo(() => pairActual(rows, ACTUAL_C3S, CLINKER_FREE_LIME), [rows])
-  const predicted = useMemo(() => pairPredicted(rows, PREDICTED_C3S, CLINKER_FREE_LIME), [rows])
+  const line = useLine()
+  const ACTUAL_C3S = line.actualC3S
+  const PREDICTED_C3S = line.predictedC3S
+  const CLINKER_FREE_LIME = line.freeLime
+  const actual = useMemo(() => pairActual(rows, ACTUAL_C3S, CLINKER_FREE_LIME), [rows, ACTUAL_C3S, CLINKER_FREE_LIME])
+  const predicted = useMemo(() => pairPredicted(rows, PREDICTED_C3S, CLINKER_FREE_LIME), [rows, PREDICTED_C3S, CLINKER_FREE_LIME])
   // Every C3S value in the rows, so a sample left off for want of a free lime is counted, not lost.
   const totals = useMemo(
     () => ({
       actual: extractSeries(rows, ACTUAL_C3S).length,
       predicted: extractSeries(rows, PREDICTED_C3S).length,
     }),
-    [rows],
+    [rows, ACTUAL_C3S, PREDICTED_C3S],
   )
   const unpairedActual = totals.actual - actual.length
   const unpairedPredicted = totals.predicted - predicted.length
@@ -71,7 +68,7 @@ export function ClinkerZones({
 
   const [c3sLo, c3sHi] = targets.c3sBand
   const [flLo, flHi] = targets.freeLimeBand
-  const flLabel = sensorLabel(LAB_DEVICE, CLINKER_FREE_LIME)
+  const flLabel = line.label(CLINKER_FREE_LIME)
 
   return (
     <div className="czones">
@@ -83,7 +80,7 @@ export function ClinkerZones({
       <div className="grid grid--2">
         <section className="czones__plot">
           <h4>
-            Actual: {sensorLabel(LAB_DEVICE, ACTUAL_C3S)} vs free lime{' '}
+            Actual: {line.label(ACTUAL_C3S)} vs free lime{' '}
             <span className="muted">n={actual.length} lab samples</span>
           </h4>
           {actual.length === 0 ? (
@@ -108,7 +105,7 @@ export function ClinkerZones({
         </section>
         <section className="czones__plot">
           <h4>
-            Predicted: {sensorLabel(LAB_DEVICE, PREDICTED_C3S)} vs free lime{' '}
+            Predicted: {line.label(PREDICTED_C3S)} vs free lime{' '}
             <span className="muted">n={predicted.length} predictions</span>
           </h4>
           {predicted.length === 0 ? (

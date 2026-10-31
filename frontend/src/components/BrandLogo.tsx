@@ -1,11 +1,20 @@
-/** The Adani Cement logo, as supplied by the plant (2026-10-28). */
+/**
+ * The plant's brand: its logo when the client spec carries one, otherwise its name as a wordmark.
+ * Before a line is chosen (the sign-in gate) the remembered or default plant is shown.
+ */
 
-import logo from '../assets/adani-cement-logo.png'
+import type { PlantSpec } from '../config/clients/types'
+import { loadLineSelection, resolveLine } from '../config/plants'
 
-export function BrandLogo({ large = false }: { large?: boolean }) {
+export function BrandLogo({ plant, large = false }: { plant?: PlantSpec; large?: boolean }) {
+  const p = plant ?? resolveLine(loadLineSelection()).plant
   return (
     <div className={`brand ${large ? 'brand--lg' : ''}`}>
-      <img className="brand__logo" src={logo} alt="Adani Cement" width={412} height={265} />
+      {p.brand.logo ? (
+        <img className="brand__logo" src={p.brand.logo} alt={p.brand.alt} />
+      ) : (
+        <span className="brand__wordmark">{p.brand.alt}</span>
+      )}
     </div>
   )
 }

@@ -3,16 +3,16 @@
  *
  * Two independent loads keyed by the event time, each with its own error, so a failing
  * process feed still leaves the laboratory samples on screen:
- *   - ADANI_RAW over the trend window (1 h before to 30 min after the event),
- *   - ADANI_LAB over the look-back before the event, for the last samples.
+ *   - the line's process devices over the trend window (1 h before to 30 min after the event),
+ *   - its laboratory devices over the look-back before the event, for the last samples.
  *
  * Results are kept per event for the life of the dashboard, so going back to an event or
  * returning to the tab does not fetch again. `reload` drops the cached entry.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { LineConfig } from '../config/plants'
-import { fetchRange } from '../services/deviceDataService'
+import type { LineModel } from '../config/lineModel'
+import { fetchDevicesRange } from '../services/lineDataService'
 import { AuthError } from '../services/apiClient'
 import type { TimestampRow } from '../lib/series'
 import { labWindow, trendWindow } from '../lib/eventTrends'
@@ -43,12 +43,13 @@ function toSectionError(err: unknown): SectionError {
 }
 
 async function load(
-  devID: string,
+  line: LineModel,
+  devIDs: readonly string[],
   w: EventWindow,
   signal: AbortSignal,
 ): Promise<Loaded> {
   try {
-    return { rows: await fetchRange(devID, w.start, w.end, signal), error: null }
+    return { rows: await fetchDevicesRange(line, devIDs, w.start, w.end, signal), error: null }
   } catch (err) {
     if (signal.aborted) throw err
     return { rows: [], error: toSectionError(err) }
@@ -56,10 +57,10 @@ async function load(
 }
 
 /** `eventMs` null means "nothing to load" (no event selected, or the tab is not open). */
-export function useEventTrends(eventMs: number | null, line: LineConfig): EventTrends {
-  const { labDevice, processDevice } = line
+export function useEventTrends(eventMs: number | null, line: LineModel): EventTrends {
   // Keyed by line and event, so switching lines never shows another line's data.
-  const key = eventMs == null ? null : `${labDevice}|${processDevice}|${eventMs}`
+  const lineKey = `${line.plant.id}/${line.id}`
+  const key = eventMs == null ? null : `${lineKey}|${eventMs}`
   const cache = useRef(new Map<string, { process: Loaded; lab: Loaded }>())
   const [entry, setEntry] = useState<{ key: string; process: Loaded; lab: Loaded } | null>(null)
   const [nonce, setNonce] = useState(0)
@@ -73,8 +74,8 @@ export function useEventTrends(eventMs: number | null, line: LineConfig): EventT
     }
     const controller = new AbortController()
     Promise.all([
-      load(processDevice, trendWindow(eventMs), controller.signal),
-      load(labDevice, labWindow(eventMs), controller.signal),
+      load(line, line.processDevices, trendWindow(eventMs), controller.signal),
+      load(line, line.labDevices, labWindow(eventMs), controller.signal),
     ])
       .then(([process, lab]) => {
         if (controller.signal.aborted) return
@@ -86,7 +87,8 @@ export function useEventTrends(eventMs: number | null, line: LineConfig): EventT
         // Aborted: a newer event replaced this one.
       })
     return () => controller.abort()
-  }, [eventMs, key, labDevice, processDevice, nonce])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `line` is identified by key
+  }, [eventMs, key, nonce])
 
   const reload = useCallback(() => {
     if (key != null) cache.current.delete(key)

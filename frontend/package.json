@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "node src/tests/e2e.mjs"
+    "test:e2e": "node src/tests/e2e.mjs",
+    "test:e2e:jsw": "node src/tests/e2e-jsw.mjs"
   },
   "dependencies": {
     "highcharts": "^13.1.1",
