@@ -36,14 +36,20 @@ export default defineConfig(({ mode }) => {
         p.on('proxyReq', (_proxyReq, req) => {
           started.set(req, Date.now())
         })
+        // IOSENSE_LOG_BODIES=1 also prints the first 400 characters of each device-data answer, to see
+        // the shape the connector returns for a device (values, strings, timestamps only, a refusal).
+        const logBodies = env.IOSENSE_LOG_BODIES === '1'
         p.on('proxyRes', (proxyRes, req) => {
           let bytes = 0
+          let head = ''
           proxyRes.on('data', (c: Buffer) => {
             bytes += c.length
+            if (logBodies && head.length < 400) head += c.toString('utf8', 0, Math.min(c.length, 400 - head.length))
           })
           proxyRes.on('end', () => {
             const secs = ((Date.now() - (started.get(req) ?? Date.now())) / 1000).toFixed(1)
             console.log(`[proxy] ${req.method} ${req.url} -> ${proxyRes.statusCode} ${bytes} B ${secs} s`)
+            if (logBodies && /deviceData|insightResult/.test(req.url ?? '')) console.log(`[proxy-body] ${req.url} :: ${head.replace(/\s+/g, ' ')}`)
           })
         })
         p.on('error', (err, req) => {

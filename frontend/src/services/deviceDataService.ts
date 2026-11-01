@@ -12,6 +12,22 @@ import { thinRows } from '../lib/series'
 import { afterCutoff, clampEnd } from '../config/dataWindow'
 import type { TimestampRow } from '../lib/series'
 
+/**
+ * A reading as a number. The platform normally sends numbers, but a laboratory or manual-entry feed
+ * can send "61.2" as text; that is the same reading. Anything else ("NA", "", true, null) is no
+ * reading. Never a guess: "61,2" or "61.2 %" stay unread rather than being cleaned up.
+ */
+export function asReading(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'string') {
+    const t = v.trim()
+    if (!t || !/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(t)) return null
+    const n = Number(t)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
 /* ------------------------------ latest values ------------------------------ */
 
 export interface LastReading {
@@ -52,7 +68,7 @@ export async function fetchLatest(
       out.set(sensorId, { sensorId, value: null, time: null })
       continue
     }
-    const value = typeof entry.value === 'number' && Number.isFinite(entry.value) ? entry.value : null
+    const value = asReading(entry.value)
     out.set(sensorId, { sensorId, value, time: toEpochMs(entry.time) })
   }
 
@@ -96,7 +112,8 @@ export async function fetchRange(
     const values: Record<string, number> = {}
     for (const [key, value] of Object.entries(record)) {
       if (key === 'time') continue
-      if (typeof value === 'number' && Number.isFinite(value)) values[key] = value
+      const n = asReading(value)
+      if (n != null) values[key] = n
     }
     rows.push({ t, values })
   }

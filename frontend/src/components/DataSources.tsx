@@ -15,10 +15,14 @@ import { Badge } from './primitives'
 
 type Standing = 'ok' | 'stale' | 'empty' | 'refused' | 'pending'
 
-/** One word for a device's standing, from the probe and the range. */
+/**
+ * One word for a device's standing, from what the range returned. The newest-reading probe is
+ * shown in its own column and does not decide the standing: an account can be refused the
+ * latest-value route and still be served the range route (seen live on JSW, 2026-11-01).
+ */
 function standing(s: DeviceStatus, windowStart: number | null): Standing {
-  if (s.probeError || s.range?.error) return 'refused'
   if (s.range == null) return 'pending'
+  if (s.range.error) return 'refused'
   if (s.range.rows > 0) return 'ok'
   if (s.newestEver == null) return 'empty'
   // Holds data, but none in the window: the feed stopped before the window began.
@@ -126,7 +130,9 @@ export function DataSources({
                   <td>{s.kind === 'lab' ? 'laboratory' : 'process'}</td>
                   <td>
                     {s.probeError ? (
-                      <span className="sources__error" title={s.probeError}>{s.probeError}</span>
+                      <span className="sources__error" title={`The latest-value route (lastDP) answered: ${s.probeError}`}>
+                        probe refused: {s.probeError}
+                      </span>
                     ) : s.newestEver == null ? (
                       <span className="muted">{s.sensorsListed ? 'none' : '—'}</span>
                     ) : (
@@ -158,7 +164,8 @@ export function DataSources({
           <p className="muted small">
             Range {windowStart == null ? '—' : formatFull(windowStart)} – {windowEnd == null ? '—' : formatFull(windowEnd)}.
             &ldquo;Newest reading on platform&rdquo; is the platform&rsquo;s latest value for any listed sensor of the
-            device, whatever the range. A device whose request failed is shown with the platform&rsquo;s own message
+            device, whatever the range (the lastDP route; an account can be refused it and still be served the
+            range, so it does not decide the standing). A device whose request failed is shown with the platform&rsquo;s own message
             (a refusal such as &ldquo;Device not added in Account&rdquo;, or a response the connector cut off); the other
             devices still load. A device with data on the platform but none in range stopped reporting
             before the range began: widen or move the range to see it.

@@ -430,6 +430,19 @@ describe('impossible readings', () => {
   })
 })
 
+describe('readings sent as text', () => {
+  it('reads a numeric string as the number it is, in ranges and latest values, and nothing looser', async () => {
+    mockFetch({
+      success: true,
+      data: [{ time: '2026-10-31T06:00:00.000Z', D18: '61.2', D24: ' 1.35 ', D19: 'NA', D5: '', D13: '2,25', D10: true }],
+    })
+    const rows = await fetchRange('FLSCLINKER', 1, 2)
+    expect(rows[0].values).toEqual({ D18: 61.2, D24: 1.35 })
+    mockFetch({ success: true, data: { devID: 'FLSCLINKER', data: { D18: { time: '2026-10-31T06:00:00.000Z', value: '61.2' } } } })
+    expect((await fetchLatest('FLSCLINKER', ['D18'])).get('D18')?.value).toBe(61.2)
+  })
+})
+
 describe('request options', () => {
   it('bypasses the HTTP cache on every call, so a cut-off answer is never revalidated and replayed', async () => {
     const spy = mockFetch({ success: true, data: [] })
