@@ -37,7 +37,7 @@ const WORD: Record<Standing, string> = {
   ok: 'Data in range',
   stale: 'Stopped before range',
   empty: 'No data',
-  refused: 'Refused by platform',
+  refused: 'Request failed',
   pending: 'Loading',
 }
 
@@ -50,7 +50,7 @@ function classify(sources: readonly DeviceStatus[], windowStart: number | null) 
       ? 'No devices configured'
       : [
           `${count('ok')} of ${rows.length} devices with data in range`,
-          refused ? `${refused} refused by the platform` : null,
+          refused ? `${refused} failed` : null,
           count('stale') ? `${count('stale')} stopped before the range` : null,
           count('empty') ? `${count('empty')} with no data` : null,
         ]
@@ -158,8 +158,9 @@ export function DataSources({
           <p className="muted small">
             Range {windowStart == null ? '—' : formatFull(windowStart)} – {windowEnd == null ? '—' : formatFull(windowEnd)}.
             &ldquo;Newest reading on platform&rdquo; is the platform&rsquo;s latest value for any listed sensor of the
-            device, whatever the range. A device the platform refused is shown with the platform&rsquo;s own message;
-            the other devices still load. A device with data on the platform but none in range stopped reporting
+            device, whatever the range. A device whose request failed is shown with the platform&rsquo;s own message
+            (a refusal such as &ldquo;Device not added in Account&rdquo;, or a response the connector cut off); the other
+            devices still load. A device with data on the platform but none in range stopped reporting
             before the range began: widen or move the range to see it.
           </p>
         </div>

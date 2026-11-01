@@ -4,6 +4,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  MIN_CHUNK_MS,
+  fetchChunkResilient,
   fetchLatest,
   fetchRange,
   fetchRangeChunked,
@@ -425,6 +427,77 @@ describe('impossible readings', () => {
   it('leaves the process device alone: its D55 is a different tag', async () => {
     const rows = qualifyRows(ADANI, 'ADANI_RAW', [{ t: Date.parse(T), values: { D55: 812 } }])
     expect(rows[0].values['ADANI_RAW:D55']).toBe(812)
+  })
+})
+
+describe('request options', () => {
+  it('bypasses the HTTP cache on every call, so a cut-off answer is never revalidated and replayed', async () => {
+    const spy = mockFetch({ success: true, data: [] })
+    await fetchRange('ABBKLN_A1', 1, 2)
+    expect(spy.mock.calls[0][1]?.cache).toBe('no-store')
+    const put = mockFetch({ success: true, data: { devID: 'x', data: {} } })
+    await fetchLatest('ABBKLN_A1', ['D154'])
+    expect(put.mock.calls[0][1]?.cache).toBe('no-store')
+  })
+})
+
+describe('a response the platform cuts off', () => {
+  const HOUR = 3_600_000
+  const START = Date.parse('2026-10-30T00:00:00Z')
+
+  /** Answers a window of at most `okSpanMs` with hourly rows; anything wider comes back as `failure`. */
+  function sizeLimitedDevice(okSpanMs: number, failure: () => Response) {
+    const calls: Array<[number, number]> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const [, s, e] = String(input).match(/getDataByStEt\/[^/]+\/(\d+)\/(\d+)/) ?? []
+        const from = Number(s)
+        const to = Number(e)
+        calls.push([from, to])
+        if (to - from > okSpanMs) return failure()
+        const rows = []
+        for (let t = Math.ceil(from / HOUR) * HOUR; t <= to; t += HOUR) rows.push({ time: new Date(t).toISOString(), D154: 9 })
+        return new Response(JSON.stringify({ success: true, data: rows }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }),
+    )
+    return calls
+  }
+  const emptyBody = () => new Response('', { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } })
+  const badGateway = () => new Response('', { status: 502, headers: { 'Content-Type': 'text/plain' } })
+
+  it('splits a chunk the platform answers with HTTP 200 and an empty body until it fits', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const calls = sizeLimitedDevice(6 * HOUR, emptyBody)
+    const rows = await fetchChunkResilient('ABBKLN_A1', START, START + 24 * HOUR)
+    expect(rows).toHaveLength(25)
+    expect(rows.map((r) => r.t)).toEqual([...rows.map((r) => r.t)].sort((a, b) => a - b))
+    // 24 h → 2 × 12 h → 4 × 6 h: three failures, four answers.
+    expect(calls.filter(([s, e]) => e - s > 6 * HOUR)).toHaveLength(3)
+    expect(calls.filter(([s, e]) => e - s <= 6 * HOUR)).toHaveLength(4)
+    log.mockRestore()
+  })
+
+  it('does the same for a gateway 502, through the day-sized chunks of a range', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    sizeLimitedDevice(6 * HOUR, badGateway)
+    const { rows } = await fetchRangeChunked('ABBKLN_A1', START, START + 2 * 24 * HOUR)
+    expect(rows).toHaveLength(49)
+    log.mockRestore()
+  })
+
+  it('gives up below half an hour, after one retry, with the platform\'s message', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const calls = sizeLimitedDevice(0, emptyBody)
+    await expect(fetchChunkResilient('ABBKLN_A1', START, START + MIN_CHUNK_MS)).rejects.toThrow(/empty body/)
+    expect(calls).toHaveLength(2)
+    log.mockRestore()
+  })
+
+  it('does not split or retry a refusal: that is not about size', async () => {
+    mockFetch({ success: false, errors: ['Device not added in Account'] })
+    await expect(fetchChunkResilient('X', START, START + 24 * HOUR)).rejects.toThrow(/not added/)
+    expect((globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(1)
   })
 })
 

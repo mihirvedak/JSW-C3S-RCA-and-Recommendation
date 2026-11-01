@@ -58,6 +58,30 @@ so the browser is not blocked by CORS.
 
 ---
 
+## Live JSW session, what the connector answered (2026-10-31 → 11-01)
+
+Seen in the dev-server log from the plant's own signed-in browser (no token here, so these are the
+only live observations):
+
+- **18:38, 31 Oct:** `connect ECONNREFUSED 4.187.167.181:443` for `ABBKLN_A1` (24 h) and `FLSCLINKER`
+  (16 h) — the connector refused connections for a moment; the browser saw HTTP 502, empty body.
+- **09:09, 1 Nov:** nineteen `getDataByStEt` answers for `ABBKLN_A1`, `ABBBHPH_A1`, `ABBKLNAFRSGC_A1`,
+  `FLSCLINKER`, `FLSCALCINATION1/2` as **HTTP 200 with an empty body**; the other devices answered
+  normally. Each empty answer failed its device, and until 7a1d8ec one failed device blanked the page.
+- **09:3x, 1 Nov** (with proxy logging on): the same `ABBKLN_A1` 24 h chunks answered **304 Not
+  Modified, 0 B, ~2 s** — the browser was revalidating cached copies; a cut-off empty answer, once
+  cached, is replayed empty on every later load.
+
+Consequences in the app:
+- Every API call is sent with `cache: 'no-store'` (`services/apiClient.ts`): no conditional requests,
+  no cached device data.
+- A chunk the platform answers with a gateway error, no response, or a 2xx with an empty body is
+  **split in half and asked for again**, down to 30 minutes, then retried once, then reported with the
+  platform's message (`fetchChunkResilient` in `services/deviceDataService.ts`). An answer cut off
+  for size therefore still arrives, in smaller pieces.
+- The Vite proxy logs every proxied answer (`[proxy] GET … -> status bytes seconds`) and sets no
+  proxy-side timeout, so the connector's behaviour can be read from the server log without a browser.
+
 ## Data sources panel and per-device failures (2026-11-01)
 
 A line now loads each device on its own (three at a time, `services/lineDataService.ts`): a device

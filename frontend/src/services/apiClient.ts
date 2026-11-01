@@ -17,6 +17,14 @@ export class ApiError extends Error {
   /** First part of the response body, when it was not the JSON we expected. */
   readonly bodySnippet?: string
 
+  /**
+   * True for the failures that come from the transport, not from the request: no response, a
+   * gateway error, or a 2xx whose body was cut off (empty). Worth retrying, or asking for less.
+   */
+  get transient(): boolean {
+    return this.status === 0 || this.status === 502 || this.status === 503 || this.status === 504 || (this.status >= 200 && this.status < 300 && this.bodySnippet === '')
+  }
+
   constructor(
     message: string,
     status: number,
@@ -93,7 +101,10 @@ async function request<T>(
 
   let res: Response
   try {
-    res = await fetch(`${API_BASE}${route}`, { ...init, headers })
+    // Never through the HTTP cache: live device data must not be answered from a stored copy, and a
+    // response the connector once cut off (seen live 2026-10-31: HTTP 200, empty body) must not be
+    // revalidated with a 304 and served back empty on every later load.
+    res = await fetch(`${API_BASE}${route}`, { ...init, headers, cache: 'no-store' })
   } catch (cause) {
     // A request the caller cancelled (a newer selection superseded it) is not a failure.
     // Re-throw it as the abort it is so callers can ignore it, rather than reporting a
@@ -138,7 +149,11 @@ async function request<T>(
   if (body == null) {
     const snippet = raw.replace(/\s+/g, ' ').trim().slice(0, 200)
     const hint = hintForStatus(res.status, method, route)
-    const detail = hint ?? `Expected JSON from ${method} ${route} but got a non-JSON body.`
+    const detail =
+      hint ??
+      (snippet === '' && res.ok
+        ? `The platform answered ${method} ${route} with HTTP ${res.status} and an empty body: the response was cut off upstream, usually because the request was too large or too slow for the connector or a gateway in front of it.`
+        : `Expected JSON from ${method} ${route} but got a non-JSON body.`)
     // Logged in full so the failing call is identifiable from the console.
     console.error(`[api] ${method} ${route} → HTTP ${res.status}`, {
       contentType: res.headers.get('content-type'),

@@ -220,9 +220,9 @@ await step('every one of the fifteen devices is read, and no Adani device is', a
 await step('a device the platform refuses is named in Data sources, in the platform\u2019s words, and nothing else goes dark', async () => {
   const toggle = page.locator('.sources__toggle')
   await toggle.waitFor({ timeout: 10_000 })
-  await page.waitForFunction(() => /refused by the platform/.test(document.querySelector('.sources__summary')?.textContent ?? ''), null, { timeout: 15_000 })
+  await page.waitForFunction(() => /\d failed/.test(document.querySelector('.sources__summary')?.textContent ?? ''), null, { timeout: 15_000 })
   const summary = await page.locator('.sources__summary').innerText()
-  if (!/1 refused by the platform/.test(summary)) throw new Error(`summary: ${summary}`)
+  if (!/1 failed/.test(summary)) throw new Error(`summary: ${summary}`)
   if (!/1 stopped before the range/.test(summary)) throw new Error(`the stopped kiln feed laboratory should be counted: ${summary}`)
   await toggle.click()
   await page.locator('.sources__table').waitFor({ timeout: 5_000 })

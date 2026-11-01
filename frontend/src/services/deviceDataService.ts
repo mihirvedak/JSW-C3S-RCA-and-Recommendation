@@ -6,7 +6,7 @@
  * and merges the devices of a line, so nothing downstream is ever addressed by D-tag alone.
  */
 
-import { api } from './apiClient'
+import { ApiError, api } from './apiClient'
 import { DAY_MS, MINUTE_MS, toEpochMs } from '../lib/time'
 import { thinRows } from '../lib/series'
 import { afterCutoff, clampEnd } from '../config/dataWindow'
@@ -105,6 +105,59 @@ export async function fetchRange(
   return rows.sort((a, b) => a.t - b.t)
 }
 
+/** Below this span a chunk is not split further; a failure then is reported as it is. */
+export const MIN_CHUNK_MS = 30 * MINUTE_MS
+
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const t = setTimeout(resolve, ms)
+    signal?.addEventListener('abort', () => {
+      clearTimeout(t)
+      reject(new DOMException('Aborted', 'AbortError'))
+    })
+  })
+
+/**
+ * One chunk, with the platform's failure modes handled: a gateway error (502/503/504), no response,
+ * or a 2xx whose body was cut off (seen live on 2026-10-31 for the JSW DCS and clinker devices: HTTP
+ * 200 with an empty body, and 502 with none). Those are transport failures that depend on the size
+ * of the answer, so the chunk is split in half and each half asked for again, down to
+ * `MIN_CHUNK_MS`; a half-hour that still fails is retried once and then reported as it is.
+ * Anything else (a refusal, a session problem) is thrown at once.
+ */
+export async function fetchChunkResilient(
+  devID: string,
+  startMs: number,
+  endMs: number,
+  signal?: AbortSignal,
+  depth = 0,
+): Promise<TimestampRow[]> {
+  try {
+    return await fetchRange(devID, startMs, endMs, signal)
+  } catch (err) {
+    if (signal?.aborted || !(err instanceof ApiError) || !err.transient) throw err
+    const span = endMs - startMs
+    if (span > MIN_CHUNK_MS) {
+      const mid = startMs + Math.floor(span / 2)
+      const [a, b] = await Promise.all([
+        fetchChunkResilient(devID, startMs, mid, signal, depth + 1),
+        fetchChunkResilient(devID, mid, endMs, signal, depth + 1),
+      ])
+      return thinRows([...a, ...b], 1)
+    }
+    if (depth >= 0 && !(err as ApiError & { retried?: boolean }).retried) {
+      await sleep(400, signal)
+      try {
+        return await fetchRange(devID, startMs, endMs, signal)
+      } catch (again) {
+        if (again instanceof ApiError) (again as ApiError & { retried?: boolean }).retried = true
+        throw again
+      }
+    }
+    throw err
+  }
+}
+
 export interface ChunkedRange {
   rows: TimestampRow[]
   /** Start actually fetched. Later than the requested start when the span was capped. */
@@ -161,7 +214,7 @@ export async function fetchRangeChunked(
   async function worker() {
     while (next < chunks.length) {
       const i = next++
-      results[i] = await fetchRange(devID, chunks[i][0], chunks[i][1], signal)
+      results[i] = await fetchChunkResilient(devID, chunks[i][0], chunks[i][1], signal)
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, chunks.length) }, worker))
