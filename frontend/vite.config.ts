@@ -1,4 +1,5 @@
 import react from '@vitejs/plugin-react'
+import { constants as zc, brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib'
 import { defineConfig, loadEnv } from 'vite'
 import type { ProxyOptions } from 'vite'
 
@@ -39,17 +40,40 @@ export default defineConfig(({ mode }) => {
         // IOSENSE_LOG_BODIES=1 also prints the first 400 characters of each device-data answer, to see
         // the shape the connector returns for a device (values, strings, timestamps only, a refusal).
         const logBodies = env.IOSENSE_LOG_BODIES === '1'
+        // The connector compresses its answers; the snippet is taken after inflating the first 64 KB.
+        const inflateHead = (buf: Buffer, encoding: string | undefined): string => {
+          try {
+            const out =
+              encoding === 'gzip'
+                ? gunzipSync(buf, { finishFlush: zc.Z_SYNC_FLUSH })
+                : encoding === 'br'
+                  ? brotliDecompressSync(buf, { finishFlush: zc.BROTLI_OPERATION_FLUSH })
+                  : encoding === 'deflate'
+                    ? inflateSync(buf, { finishFlush: zc.Z_SYNC_FLUSH })
+                    : buf
+            return out.toString('utf8', 0, Math.min(out.length, 600))
+          } catch (err) {
+            return `(could not inflate ${encoding}: ${err instanceof Error ? err.message : String(err)})`
+          }
+        }
         p.on('proxyRes', (proxyRes, req) => {
           let bytes = 0
-          let head = ''
+          const head: Buffer[] = []
+          let kept = 0
           proxyRes.on('data', (c: Buffer) => {
             bytes += c.length
-            if (logBodies && head.length < 400) head += c.toString('utf8', 0, Math.min(c.length, 400 - head.length))
+            if (logBodies && kept < 65536) {
+              head.push(c)
+              kept += c.length
+            }
           })
           proxyRes.on('end', () => {
             const secs = ((Date.now() - (started.get(req) ?? Date.now())) / 1000).toFixed(1)
-            console.log(`[proxy] ${req.method} ${req.url} -> ${proxyRes.statusCode} ${bytes} B ${secs} s`)
-            if (logBodies && /deviceData|insightResult/.test(req.url ?? '')) console.log(`[proxy-body] ${req.url} :: ${head.replace(/\s+/g, ' ')}`)
+            const enc = String(proxyRes.headers['content-encoding'] ?? 'identity')
+            console.log(`[proxy] ${req.method} ${req.url} -> ${proxyRes.statusCode} ${bytes} B ${secs} s ${enc}`)
+            if (logBodies && /deviceData|insightResult/.test(req.url ?? '')) {
+              console.log(`[proxy-body] ${req.url} :: ${inflateHead(Buffer.concat(head), enc).replace(/\s+/g, ' ')}`)
+            }
           })
         })
         p.on('error', (err, req) => {

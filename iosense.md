@@ -72,7 +72,20 @@ only live observations):
   Modified, 0 B, ~2 s** — the browser was revalidating cached copies; a cut-off empty answer, once
   cached, is replayed empty on every later load.
 
+- **09:5x, 1 Nov** (body snippets on): answers are **gzip / brotli compressed** (the byte counts above
+  are compressed sizes). The latest-value route answers every device; **laboratory values arrive as
+  strings** (`"40.25646999999998"`), the model's and the DCS's as numbers. Newest values:
+  `FLSCLINKER` D18 lab C3S **16 Oct 2026 17:00**; `JSWCOAL_A1`, both calorimeters and `JSWCALN_A1`
+  16 Oct; `FLSCALCINATION` 11 Jul 2025; `JSW_C3S` D7 and the three DCS devices current (1 Nov).
+  So every laboratory feed stopped reaching the platform on 16 Oct while the model and the DCS went
+  on — that, not the dashboard, is why no actual C3S shows in any recent window.
+
 Consequences in the app:
+- Readings sent as numeric strings are read as numbers (`asReading` in `services/deviceDataService.ts`);
+  before 1 Nov they were discarded, so the laboratory devices looked empty even for ranges that held data.
+- A banner names every laboratory device whose newest reading is more than a day before the window's
+  end, with its last date and what it carries (laboratory C3S, free lime), so an empty actual C3S is
+  explained where it is seen.
 - Every API call is sent with `cache: 'no-store'` (`services/apiClient.ts`): no conditional requests,
   no cached device data.
 - A chunk the platform answers with a gateway error, no response, or a 2xx with an empty body is

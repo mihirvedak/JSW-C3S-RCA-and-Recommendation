@@ -239,6 +239,15 @@ await step('a device the platform refuses is named in Data sources, in the platf
   await toggle.click()
 })
 
+await step('a laboratory feed that stopped before the range is named at the top of the page, with its last date', async () => {
+  const banner = page.locator('[data-testid="lab-behind"]')
+  await banner.waitFor({ timeout: 15_000 })
+  const text = await banner.innerText()
+  if (!text.includes('FLSKILNFEED')) throw new Error(`banner should name the stopped kiln feed laboratory: ${text}`)
+  if (!/last reported .*2026.*\(\d+ d ago\)/.test(text)) throw new Error(`banner should give the last date and age: ${text}`)
+  if (text.includes('FLSCLINKER')) throw new Error('the clinker laboratory reports in range and must not be listed')
+})
+
 await step('Executive View: C3S from the right devices, compliance from the plant targets, no bin table', async () => {
   const legend = await page.locator('.legend').first().innerText()
   if (!legend.includes('Clinker C3S (XRD)') || !legend.includes('Predicted C3S (Bogue + Ridge)')) throw new Error(`trend legend names: ${legend}`)
