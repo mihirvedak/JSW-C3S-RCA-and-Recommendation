@@ -239,16 +239,33 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             <strong>
               {labBehind.length === 1 ? 'A laboratory feed is behind.' : `${labBehind.length} laboratory feeds are behind.`}
             </strong>{' '}
-            {labBehind.map((s, i) => (
+            {labBehind.slice(0, 3).map((s, i) => (
               <span key={s.devID}>
                 {i > 0 ? ' · ' : ''}
                 <code>{s.devID}</code> ({s.label}
                 {s.carries.length ? `; carries the ${s.carries.join(' and ')}` : ''}) last reported{' '}
-                <strong title={formatFull(s.newestEver)}>{formatFull(s.newestEver)}</strong> ({formatAge(s.newestEver, now)})
+                <strong>{formatFull(s.newestEver)}</strong> ({formatAge(s.newestEver, now)})
               </span>
             ))}
-            . Their parameters cannot appear in a range that ends after that; pick a range ending on or before the
-            last date to see them, and raise the stopped feed with the plant&rsquo;s laboratory integration.
+            {labBehind.length > 3 ? (
+              <span title={labBehind.slice(3).map((s) => `${s.devID}: ${formatFull(s.newestEver)}`).join('\n')}>
+                {' '}· and {labBehind.length - 3} more (see Data sources)
+              </span>
+            ) : null}
+            . Their parameters cannot appear in a range that ends after that.{' '}
+            <button
+              type="button"
+              className="btn btn--sm notice__action"
+              onClick={() => {
+                // The 7 days up to the newest laboratory reading, as a custom range: every laboratory
+                // parameter that was being sent then appears, and the stop is on the right edge.
+                const end = labBehind[0].newestEver! + MINUTE_MS
+                setSelection({ kind: 'custom', start: end - 7 * DAY_MS, end, label: `Week up to the last ${labBehind[0].label.toLowerCase()} sample` })
+              }}
+            >
+              Show the week up to {formatFull(labBehind[0].newestEver)}
+            </button>{' '}
+            Raise the stopped feed with the plant&rsquo;s laboratory integration.
           </div>
         ) : null}
 

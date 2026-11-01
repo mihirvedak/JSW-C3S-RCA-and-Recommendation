@@ -246,6 +246,19 @@ await step('a laboratory feed that stopped before the range is named at the top 
   if (!text.includes('FLSKILNFEED')) throw new Error(`banner should name the stopped kiln feed laboratory: ${text}`)
   if (!/last reported .*2026.*\(\d+ d ago\)/.test(text)) throw new Error(`banner should give the last date and age: ${text}`)
   if (text.includes('FLSCLINKER')) throw new Error('the clinker laboratory reports in range and must not be listed')
+  // One click moves the range to the week up to the last kiln feed sample, and the kiln feed LSF appears.
+  await banner.getByRole('button', { name: /Show the week up to/ }).click()
+  await page.waitForTimeout(1500)
+  if ((await page.locator('[data-testid="lab-behind"]').count()) !== 0) throw new Error('with the range moved back, no laboratory feed is behind it')
+  await openTab('C3S Analysis')
+  await page.getByRole('tab', { name: /Kiln Feed Quality/ }).click()
+  const lsf = await page.locator('.lab-cell[title="FLSKILNFEED:D6"]').innerText()
+  if (!/\d+\.\d/.test(lsf) || lsf.includes('no sample')) throw new Error(`kiln feed LSF should show a value in the week up to its last sample: ${lsf.replace(/\s+/g, ' ')}`)
+  await openTab('Executive View')
+  // Back to the live preset for the steps that follow.
+  await page.locator('.trp__trigger').click()
+  await page.getByRole('button', { name: 'Last 7 Days' }).click()
+  await page.waitForTimeout(1500)
 })
 
 await step('Executive View: C3S from the right devices, compliance from the plant targets, no bin table', async () => {

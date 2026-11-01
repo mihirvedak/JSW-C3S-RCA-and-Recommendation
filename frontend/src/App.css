@@ -1462,3 +1462,6 @@ button.rtl__seg:focus-visible { outline: 2px solid var(--c-ink); outline-offset:
   .scopebar__trailing { margin-left: 0; flex-basis: 100%; }
   .sources__summary { display: none; }
 }
+
+/* An action inside a notice sits on the text line. */
+.notice__action { vertical-align: baseline; margin: 0 2px; }
