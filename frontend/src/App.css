@@ -1420,3 +1420,45 @@ button.rtl__seg:focus-visible { outline: 2px solid var(--c-ink); outline-offset:
 .shift__action .shc-link { margin-top: 6px; }
 .shift__section h4 { display: flex; align-items: center; gap: var(--sp-2); }
 .shift__section h4 .prov { text-transform: none; letter-spacing: 0; }
+
+/* Data sources: a one-line toggle at the end of the scope bar; the table opens under the bar. */
+.scopebar__trailing { margin-left: auto; align-self: center; }
+.sources__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.sources__toggle:hover { background: var(--c-info-bg); }
+.sources__toggle:focus-visible { outline: 2px solid var(--c-brand); outline-offset: 1px; }
+.sources__toggle--refused { border-color: var(--c-low); }
+.sources__chev { width: 1em; color: var(--c-ink-3); }
+.sources__summary { color: var(--c-ink-3); }
+.sources__toggle--refused .sources__summary { color: var(--c-low); font-weight: 600; }
+.sources {
+  margin: calc(-1 * var(--sp-2)) 0 var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+}
+.sources--refused { border-color: var(--c-low); }
+.sources__body { padding: var(--sp-2) var(--sp-3) var(--sp-3); overflow-x: auto; }
+.sources__table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sources__table th, .sources__table td { padding: 6px 8px; border-top: 1px solid var(--c-border); text-align: left; vertical-align: top; }
+.sources__table thead th { border-top: 0; color: var(--c-ink-3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }
+.sources__table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sources__table code { font-size: 11.5px; }
+.sources__label { display: block; color: var(--c-ink-3); font-weight: 400; }
+.sources__error { color: var(--c-low); font-weight: 600; }
+@media (max-width: 760px) {
+  .scopebar__trailing { margin-left: 0; flex-basis: 100%; }
+  .sources__summary { display: none; }
+}

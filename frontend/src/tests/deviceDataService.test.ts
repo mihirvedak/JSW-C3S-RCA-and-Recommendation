@@ -8,7 +8,7 @@ import {
   fetchRange,
   fetchRangeChunked,
 } from '../services/deviceDataService'
-import { fetchDevicesRange, fetchLatestByKey, fetchNewestC3S, mergeRows, qualifyRows } from '../services/lineDataService'
+import { fetchDevicesRange, fetchDevicesRangeDetailed, fetchLatestByDevice, fetchLatestByKey, fetchNewestC3S, mergeRows, qualifyRows } from '../services/lineDataService'
 import { ApiError, AuthError } from '../services/apiClient'
 import { applyDataEnd } from '../config/dataWindow'
 import { ADANI, JSW, lab } from './lines'
@@ -425,6 +425,50 @@ describe('impossible readings', () => {
   it('leaves the process device alone: its D55 is a different tag', async () => {
     const rows = qualifyRows(ADANI, 'ADANI_RAW', [{ t: Date.parse(T), values: { D55: 812 } }])
     expect(rows[0].values['ADANI_RAW:D55']).toBe(812)
+  })
+})
+
+describe('a device the platform refuses', () => {
+  const T = Date.parse('2026-10-30T06:00:00.000Z')
+  /** FLSBALLMILL is refused; every other device answers one row. */
+  function mixedPlatform() {
+    const spy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const refused = url.includes('/FLSBALLMILL/') || (init?.body != null && String(init.body).includes('"FLSBALLMILL"'))
+      const asked: string[] = url.includes('/lastDP') ? (JSON.parse(String(init?.body ?? '{}')).sensors ?? []) : []
+      const body = refused
+        ? { success: false, errors: ['Device not added in Account'] }
+        : url.includes('/lastDP')
+          ? { success: true, data: { devID: 'x', data: Object.fromEntries(asked.map((id) => [id, { time: new Date(T).toISOString(), value: 1 }])) } }
+          : { success: true, data: [{ time: new Date(T).toISOString(), D7: 1 }] }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', spy)
+    return spy
+  }
+
+  it('is reported by name, in the platform\'s words, while the other devices still load', async () => {
+    mixedPlatform()
+    const { rows, outcomes } = await fetchDevicesRangeDetailed(JSW, JSW.labDevices, T - 1, T + 1)
+    const ball = outcomes.find((o) => o.devID === 'FLSBALLMILL')
+    expect(ball?.error).toBe('Device not added in Account')
+    expect(ball?.rows).toBe(0)
+    expect(outcomes.filter((o) => o.error == null)).toHaveLength(JSW.labDevices.length - 1)
+    expect(rows).toHaveLength(1)
+    expect(Object.keys(rows[0].values)).toContain('FLSKILNFEED:D7')
+    expect(Object.keys(rows[0].values)).not.toContain('FLSBALLMILL:D7')
+  })
+
+  it('is fatal only when every device is refused', async () => {
+    mockFetch({ success: false, errors: ['User Device not added to your account'] })
+    await expect(fetchDevicesRange(JSW, JSW.processDevices, 1, 2)).rejects.toThrow(/None of the 4 devices could be read.*ABBKLN_A1: User Device not added/)
+  })
+
+  it('shows up in the newest-reading probe the same way', async () => {
+    mixedPlatform()
+    const { outcomes } = await fetchLatestByDevice(JSW)
+    expect(outcomes.find((o) => o.devID === 'FLSBALLMILL')?.error).toBe('Device not added in Account')
+    expect(outcomes.find((o) => o.devID === 'FLSCLINKER')?.newest).toBe(T)
   })
 })
 

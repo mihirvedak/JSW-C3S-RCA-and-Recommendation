@@ -58,6 +58,19 @@ so the browser is not blocked by CORS.
 
 ---
 
+## Data sources panel and per-device failures (2026-11-01)
+
+A line now loads each device on its own (three at a time, `services/lineDataService.ts`): a device
+the platform refuses ("Device not added in Account", a session problem, a gateway error) is
+reported by name with the platform's message and the other devices still render; only every
+device failing raises the page-level error. The **Data sources** toggle at the end of the scope
+bar (`components/DataSources.tsx`) opens a table per device: the platform's newest reading of any
+listed sensor (#2, one lastDP per device), how many listed sensors have ever reported, rows the
+current range returned (#3) and the newest of them, and the standing: *Data in range*, *Stopped
+before range* (data on the platform, none in the window), *No data*, *Refused by platform*. It is
+the first thing to open when a panel says "no data": it tells apart a feed that stopped, a device
+the account cannot read, and a window that simply does not reach the data.
+
 ## Clients and lines (2026-10-31)
 
 Onboarding a plant is one file in `frontend/src/config/clients/`:

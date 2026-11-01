@@ -6,6 +6,7 @@
  * option stays enabled so it reads as a choice that exists, not a broken control.
  */
 
+import type { ReactNode } from 'react'
 import { TimeRangePicker } from './TimeRangePicker'
 import type { TimeSelection } from '../hooks/useDashboardData'
 import { PLANTS, resolveLine } from '../config/plants'
@@ -19,6 +20,7 @@ export function ScopeBar({
   windowStart,
   windowEnd,
   anchorMs,
+  trailing,
 }: {
   line: LineSelection
   onLineChange: (sel: LineSelection) => void
@@ -27,6 +29,8 @@ export function ScopeBar({
   windowStart: number | null
   windowEnd: number | null
   anchorMs: number | null
+  /** A control shown at the end of the bar (the Data sources toggle). */
+  trailing?: ReactNode
 }) {
   const { plant, line: current } = resolveLine(line)
   return (
@@ -68,6 +72,7 @@ export function ScopeBar({
         windowEnd={windowEnd}
         anchorMs={anchorMs}
       />
+      {trailing ? <div className="scopebar__trailing">{trailing}</div> : null}
     </div>
   )
 }

@@ -16,7 +16,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PROCESS_THIN_MS } from '../services/deviceDataService'
 import type { LastReading } from '../services/deviceDataService'
-import { fetchDevicesRangeChunked, fetchLatestByKey, fetchNewestC3S } from '../services/lineDataService'
+import { fetchDevicesRangeChunked, fetchLatestByDevice, fetchNewestC3S } from '../services/lineDataService'
+import type { DeviceOutcome } from '../services/lineDataService'
 import { fetchAllRcaFindings } from '../services/rcaService'
 import type { RcaFinding, ShiftSummary } from '../services/rcaService'
 import { extractSeries, latestFromRows, matchSamples, unmatchedPredictions } from '../lib/series'
@@ -62,6 +63,22 @@ export interface SectionError {
   isAuth: boolean
 }
 
+/** One device's standing, for the Data sources panel. */
+export interface DeviceStatus {
+  devID: string
+  kind: 'lab' | 'process'
+  label: string
+  /** The platform's newest reading of any listed sensor, whatever the window. */
+  newestEver: number | null
+  /** Listed sensors with any reading on the platform. */
+  sensorsReporting: number
+  sensorsListed: number
+  /** Why the newest-reading probe failed, if it did. */
+  probeError: string | null
+  /** The current range's load: null until it has run. */
+  range: DeviceOutcome | null
+}
+
 export interface DashboardData {
   /** The production line everything below was loaded for. */
   line: LineModel
@@ -95,6 +112,11 @@ export interface DashboardData {
    * Empty until the probe answers, or if it fails (never fatal).
    */
   labNewest: Map<string, LastReading>
+  /**
+   * Per device: what the platform holds (newest reading of any listed sensor, or its refusal) and
+   * what the current range returned (rows, newest row, or the error). Empty until the probes answer.
+   */
+  sources: DeviceStatus[]
   processLatest: Map<string, LastReading>
   dataError: SectionError | null
 
@@ -181,6 +203,9 @@ export function useDashboardData(selection: TimeSelection, line: LineModel): Das
 
   const [labRows, setLabRows] = useState<TimestampRow[]>([])
   const [labNewest, setLabNewest] = useState<Map<string, LastReading>>(() => new Map())
+  const [probe, setProbe] = useState<DeviceOutcome[]>([])
+  const [labOutcomes, setLabOutcomes] = useState<DeviceOutcome[]>([])
+  const [processOutcomes, setProcessOutcomes] = useState<DeviceOutcome[]>([])
   const [labLoading, setLabLoading] = useState(true)
   const [dataError, setDataError] = useState<SectionError | null>(null)
 
@@ -240,17 +265,20 @@ export function useDashboardData(selection: TimeSelection, line: LineModel): Das
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `line` is identified by lineKey
   }, [nonce, lineKey])
 
-  // 1b. Newest-ever reading per laboratory sensor (one lastDP per lab device). Informational only:
-  //     a failure leaves the map empty and nothing else notices.
+  // 1b. Newest-ever reading per listed sensor (one lastDP per device). Informational: the lab cells
+  //     say when a parameter was last seen, and the Data sources panel says what each device holds.
   useEffect(() => {
     const controller = new AbortController()
     setLabNewest(new Map())
-    fetchLatestByKey(line, line.labSensors.map((s) => s.key), controller.signal)
-      .then((m) => {
-        if (!controller.signal.aborted) setLabNewest(m)
+    setProbe([])
+    fetchLatestByDevice(line, controller.signal)
+      .then(({ byKey, outcomes }) => {
+        if (controller.signal.aborted) return
+        setLabNewest(byKey)
+        setProbe(outcomes)
       })
       .catch(() => {
-        // Not shown: the windowed readings stand on their own.
+        // Aborted: a newer line replaced this one.
       })
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `line` is identified by lineKey
@@ -298,14 +326,16 @@ export function useDashboardData(selection: TimeSelection, line: LineModel): Das
       maxSpanMs: Number.POSITIVE_INFINITY,
       signal: controller.signal,
     })
-      .then(({ rows }) => {
+      .then(({ rows, outcomes }) => {
         if (controller.signal.aborted) return
         setLabRows(rows)
+        setLabOutcomes(outcomes)
         setDataError(null)
         setLastRefreshed(Date.now())
       })
       .catch((err) => {
         if (controller.signal.aborted) return
+        setLabOutcomes(err?.outcomes ?? [])
         setDataError(toSectionError(err))
       })
       .finally(() => {
@@ -330,11 +360,13 @@ export function useDashboardData(selection: TimeSelection, line: LineModel): Das
       .then((r) => {
         if (controller.signal.aborted) return
         setProcessRows(r.rows)
+        setProcessOutcomes(r.outcomes)
         setProcessNote(r.capped ? { fetchedStart: r.fetchedStart } : null)
         setProcessError(null)
       })
       .catch((err) => {
         if (controller.signal.aborted) return
+        setProcessOutcomes(err?.outcomes ?? [])
         setProcessError(toSectionError(err))
       })
       .finally(() => {
@@ -355,6 +387,24 @@ export function useDashboardData(selection: TimeSelection, line: LineModel): Das
   const actual = useMemo(() => extractSeries(labRows, line.actualC3S), [labRows, line])
   const matched = useMemo(() => matchSamples(predicted, actual), [predicted, actual])
   const awaitingLab = useMemo(() => unmatchedPredictions(predicted, actual), [predicted, actual])
+
+  const sources = useMemo<DeviceStatus[]>(() => {
+    const probed = new Map(probe.map((o) => [o.devID, o]))
+    const ranged = new Map([...labOutcomes, ...processOutcomes].map((o) => [o.devID, o]))
+    return line.devices.map((d) => {
+      const p = probed.get(d.devID)
+      return {
+        devID: d.devID,
+        kind: d.kind,
+        label: d.label,
+        newestEver: p?.newest ?? null,
+        sensorsReporting: p?.rows ?? 0,
+        sensorsListed: d.sensors.length,
+        probeError: p?.error ?? null,
+        range: ranged.get(d.devID) ?? null,
+      }
+    })
+  }, [line, probe, labOutcomes, processOutcomes])
 
   const labLatest = useMemo(() => toReadings(labRows), [labRows])
   const processLatest = useMemo(() => toReadings(processRows), [processRows])
@@ -384,6 +434,7 @@ export function useDashboardData(selection: TimeSelection, line: LineModel): Das
     labError: dataError,
     labLatest,
     labNewest,
+    sources,
     processLatest,
     dataError: dataError ?? anchorError,
     predicted,

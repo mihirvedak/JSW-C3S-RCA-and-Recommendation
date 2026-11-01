@@ -124,15 +124,21 @@ const RCA = [
 
 const API_GLOB = '**/api/**'
 const requested = []
+/** A device the simulated account cannot read, to show that one refusal never blanks the others. */
+const REFUSED = 'FLSBALLMILL'
 
 async function apiHandler(route) {
   const url = new URL(route.request().url())
   const path = url.pathname
   const json = (data) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data }) })
 
+  const refuse = () => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: false, errors: ['Device not added in Account'] }) })
+
   if (path.endsWith('/deviceData/lastDP')) {
     const { devID, sensors } = JSON.parse(route.request().postData() ?? '{}')
     requested.push({ kind: 'lastDP', devID, sensors })
+    // The ball mill laboratory is not in the simulated account: the platform refuses it.
+    if (devID === REFUSED) return refuse()
     const dev = DEVICES[devID]
     if (!dev) return json({ devID, data: Object.fromEntries(sensors.map((s) => [s, []])) })
     const newest = dev(END - 30 * 24 * HOUR, END)[0]
@@ -142,6 +148,7 @@ async function apiHandler(route) {
   if (m) {
     const [, devID, s, e] = m
     requested.push({ kind: 'range', devID, start: Number(s), end: Number(e) })
+    if (devID === REFUSED) return refuse()
     const dev = DEVICES[devID]
     return json(dev ? dev(Math.max(Number(s), END - 30 * 24 * HOUR), Math.min(Number(e), END)) : [])
   }
@@ -208,6 +215,28 @@ await step('every one of the fifteen devices is read, and no Adani device is', a
   if ([...devs].some((d) => d.startsWith('ADANI'))) throw new Error('an Adani device was requested on the JSW line')
   const probes = requested.filter((r) => r.kind === 'lastDP').map((r) => `${r.devID}:${r.sensors.join(',')}`).sort()
   if (!probes.includes('FLSCLINKER:D18') || !probes.includes('JSW_C3S:D7')) throw new Error(`newest-sample probe should ask FLSCLINKER:D18 and JSW_C3S:D7, asked ${probes.join(' ')}`)
+})
+
+await step('a device the platform refuses is named in Data sources, in the platform\u2019s words, and nothing else goes dark', async () => {
+  const toggle = page.locator('.sources__toggle')
+  await toggle.waitFor({ timeout: 10_000 })
+  await page.waitForFunction(() => /refused by the platform/.test(document.querySelector('.sources__summary')?.textContent ?? ''), null, { timeout: 15_000 })
+  const summary = await page.locator('.sources__summary').innerText()
+  if (!/1 refused by the platform/.test(summary)) throw new Error(`summary: ${summary}`)
+  if (!/1 stopped before the range/.test(summary)) throw new Error(`the stopped kiln feed laboratory should be counted: ${summary}`)
+  await toggle.click()
+  await page.locator('.sources__table').waitFor({ timeout: 5_000 })
+  const ball = page.locator('.sources__table tr[data-device="FLSBALLMILL"]')
+  if ((await ball.getAttribute('data-standing')) !== 'refused') throw new Error('ball mill should stand as refused')
+  if (!(await ball.innerText()).includes('Device not added in Account')) throw new Error('the platform\u2019s message should be shown as is')
+  const kf = page.locator('.sources__table tr[data-device="FLSKILNFEED"]')
+  if ((await kf.getAttribute('data-standing')) !== 'stale') throw new Error(`kiln feed laboratory should stand as stopped before the range: ${await kf.getAttribute('data-standing')}`)
+  const clinker = page.locator('.sources__table tr[data-device="FLSCLINKER"]')
+  if ((await clinker.getAttribute('data-standing')) !== 'ok') throw new Error('clinker laboratory should have data in range')
+  if (!/\d/.test(await clinker.locator('td').nth(3).innerText())) throw new Error('rows in range should be a number')
+  // No error banner: the refusal is per device.
+  if ((await page.locator('.notice--error').count()) !== 0) throw new Error('one refused device must not raise the page-level error')
+  await toggle.click()
 })
 
 await step('Executive View: C3S from the right devices, compliance from the plant targets, no bin table', async () => {

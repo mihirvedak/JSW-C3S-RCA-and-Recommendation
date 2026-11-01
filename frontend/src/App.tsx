@@ -16,6 +16,7 @@ import './App.css'
 
 import { Header } from './components/Header'
 import { ScopeBar } from './components/ScopeBar'
+import { DataSources, DataSourcesToggle } from './components/DataSources'
 import { ExecutiveView } from './components/ExecutiveView'
 import { C3SAnalysisView } from './components/C3SAnalysisView'
 import { LoadingState } from './components/primitives'
@@ -69,6 +70,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   // The event Trend Analysis is opened on. Set only by opening one (the RCA panel's "View process
   // trends", or the tab's own picker); opening the tab itself shows the selected range alone.
   const [trendEventId, setTrendEventId] = useState<string | null>(null)
+  const [sourcesOpen, setSourcesOpen] = useState(false)
 
   const d = useDashboardData(selection, line)
   const now = useNow()
@@ -230,7 +232,13 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
           windowStart={d.windowStart}
           windowEnd={d.windowEnd}
           anchorMs={d.anchorMs}
+          trailing={
+            <DataSourcesToggle sources={d.sources} windowStart={d.windowStart} open={sourcesOpen} onToggle={() => setSourcesOpen((o) => !o)} />
+          }
         />
+
+        {/* What each device holds and returned: the first stop when a panel says "no data". */}
+        {sourcesOpen ? <DataSources sources={d.sources} windowStart={d.windowStart} windowEnd={d.windowEnd} now={now} /> : null}
 
         {tab === 'executive' ? (
           <div role="tabpanel" id="panel-executive" aria-labelledby="tab-executive">
