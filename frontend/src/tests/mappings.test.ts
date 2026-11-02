@@ -324,6 +324,13 @@ describe('JSW Cement: the line from the tag list', () => {
     expect(JSW.spec.outputs?.writes.find((w) => w.ref.sensorId === 'D7')?.writer).toBe('JSW_S9')
   })
 
+  it('opens its own SHC Optimizer', () => {
+    expect(JSW.plant.shcOptimizerUrl).toBe(
+      'https://iosense.io/launchpad/view?id=6ae8242cbe636bd66706b234&entityName=Kiln%20SHC%20Optimization&fromLink=true&isHidden=false',
+    )
+    expect(ADANI.plant.shcOptimizerUrl).toContain('id=6ad86ac0fe275c6e1f553ae2')
+  })
+
   it('uses the default shift pattern and no data cut-off', () => {
     expect(JSW.shifts.map((s) => s.id)).toEqual(['A', 'B', 'C'])
     expect(JSW.plant.dataEnd).toBeNull()

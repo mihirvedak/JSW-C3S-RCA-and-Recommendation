@@ -462,5 +462,7 @@ export const JSW: PlantSpec = {
   name: 'JSW Cement',
   brand: { alt: 'JSW Cement' },
   dataEnd: null,
+  /** Opened from every recommendation that sends the operator to the SHC optimizer (plant, 2026-11-02). */
+  shcOptimizerUrl: 'https://iosense.io/launchpad/view?id=6ae8242cbe636bd66706b234&entityName=Kiln%20SHC%20Optimization&fromLink=true&isHidden=false',
   lines: [KILN_LINE],
 }

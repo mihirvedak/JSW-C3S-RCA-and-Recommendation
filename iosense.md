@@ -237,7 +237,7 @@ free lime < 1.5, SO3 < 1.00, LSF 92–95, SM 2.2–2.3, AM 1.3–1.5, C2S 20–2
 | Trend Analysis, laboratory | 18 quality parameters over the selected range (`labTrends`): lab and predicted C3S, free lime, clinker SO3 / LSF / SM / AM, kiln feed LSF / SM / AM / CaO / SiO2, raw mill LSF, average calcination / calciner SO3 / temperature, kiln and PC coal ash; each sample a point, the RCA event marked with the last sample before it |
 | RCA-named parameters | Fuel rates, kiln feed, fuel ash, NCV, free lime, raw-meal oxides, kiln feed LSF, raw-mix moduli resolve; **air-side / kiln-speed mentions resolve to nothing** (no tags) |
 | Data cut-off | None (loads to the newest sample) |
-| SHC Optimizer link | "Not configured for JSW Cement" until `shcOptimizerUrl` is set |
+| SHC Optimizer link | `https://iosense.io/launchpad/view?id=6ae8242cbe636bd66706b234&entityName=Kiln%20SHC%20Optimization&fromLink=true&isHidden=false` (plant, 2 Nov), opened in a new tab from every recommendation that says to go to the SHC optimizer — all 584 JSW results do |
 | Brand | Wordmark "JSW Cement" until a logo file is supplied |
 
 **To verify / still needed from the plant (the open questions):**

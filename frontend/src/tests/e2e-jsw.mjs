@@ -132,7 +132,8 @@ const event = (id, ms, zone, c3s, fcao, extra) => ({
         'Cause 1': 'Root cause not confirmed from the available data. Further validation is required before recommending corrective action.',
         ...extra.root,
       },
-      recommendations: extra.rec,
+      recommendations: extra.shc ? { ...extra.rec, 'Action 3': extra.shc } : extra.rec,
+      shc_optimizer: Boolean(extra.shc),
       outcome: { 'Result 1': 'C3S back inside its band within two batches.' },
       why: [],
       do: [],
@@ -148,6 +149,8 @@ const event = (id, ms, zone, c3s, fcao, extra) => ({
 // j1 sits in shift C (04:30 plant time) so the last completed shifts carry its set-point moves.
 const RCA = [
   event('j1', END - 7 * HOUR, 'Under burnt', 58.4, 2.3, {
+    // As the live JSW insight words it on every result.
+    shc: 'Improve SHC from 706 to 590 kcal/kg using the SHC optimizer.',
     root: { 'Watch 1': 'TSR low: 11.2% against 13.0% in this feed bin’s best period.', 'Watch 2': 'Kiln coal high: 9.6 t/h against normal 9.1 t/h.', 'Watch 3': 'Kiln feed low: 402 t/h against 410 t/h.' },
     rec: { 'Set point 1': 'Reduce Kiln coal from 9.6 to 9.1 t/h (-0.5 t/h), limits 8.6 to 9.4 t/h.', 'Set point 2': 'Increase Solid AFR from 6.1 to 6.8 t/h (+0.7 t/h), limits 5.5 to 7.0 t/h.' },
   }),
@@ -412,6 +415,16 @@ await step('an insight run on the laboratory C3S is labelled so, and the RCA pan
   // Targets come from the insight although it writes no lime-level formula: the band is drawn.
   const legend = await page.locator('.analysis .legend').innerText()
   if (!/Target band 59–63%, target 61 · from RCA insight/.test(legend)) throw new Error(`the insight's target band should be drawn: ${legend}`)
+})
+
+await step('a recommendation that sends the operator to the SHC optimizer opens the JSW SHC Optimizer, in a new tab', async () => {
+  const rec = page.locator('.panel', { hasText: 'Recommendations' }).first()
+  const link = rec.locator('a.shc-link')
+  if ((await link.count()) !== 1) throw new Error(`one SHC Optimizer link expected on the SHC action, found ${await link.count()}`)
+  const href = await link.getAttribute('href')
+  if (href !== 'https://iosense.io/launchpad/view?id=6ae8242cbe636bd66706b234&entityName=Kiln%20SHC%20Optimization&fromLink=true&isHidden=false') throw new Error(`SHC Optimizer link: ${href}`)
+  if ((await link.getAttribute('target')) !== '_blank') throw new Error('the SHC Optimizer should open in a new tab')
+  if ((await rec.locator('.shc-link--none').count()) !== 0) throw new Error('"not configured" should no longer show for JSW')
 })
 
 await step('the RCA panel reads kiln coal and AFR at the event from the DCS devices', async () => {
