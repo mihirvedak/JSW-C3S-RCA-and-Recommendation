@@ -68,6 +68,9 @@ const OTHER: GroupSpec = { id: 'other', label: 'Other' }
 /** Predicted C3S above this (%) is not a clinker value. Overridable per line. */
 export const DEFAULT_PREDICTED_C3S_MAX = 50
 
+/** C3S is a share of the clinker: below 0 % or above 80 % is a fault in the reading, not a value. */
+export const DEFAULT_C3S_RANGE = { min: 0, max: 80 } as const
+
 export class LineModel {
   readonly plant: PlantSpec
   readonly spec: LineSpec
@@ -81,6 +84,7 @@ export class LineModel {
   readonly kilnFilling: KilnFillingSpec | null
   readonly binLimits: BinLimitsSpec | null
   readonly predictedC3SMax: number
+  readonly c3sRange: { min: number; max: number }
 
   private readonly registry = new Map<string, SensorDef>()
   private readonly roles = new Map<Role, string>()
@@ -102,6 +106,7 @@ export class LineModel {
     this.kilnFilling = spec.kilnFilling ?? null
     this.binLimits = spec.binLimits ?? null
     this.predictedC3SMax = spec.predictedC3SMax ?? DEFAULT_PREDICTED_C3S_MAX
+    this.c3sRange = spec.c3sRange ?? DEFAULT_C3S_RANGE
 
     for (const d of spec.devices) {
       this.deviceLabels.set(d.devID, d.label)
@@ -322,8 +327,14 @@ export class LineModel {
 
   /* ------------------------------ plausibility ------------------------------ */
 
-  /** True when a reading is outside what the sensor can report, and must not be shown. */
+  /**
+   * True when a reading is outside what the sensor can report, and must not be shown: a C3S
+   * (laboratory or predicted) below or above the line's C3S range, or a prediction above its cap.
+   * The limits themselves are values (0 % and 80 % are kept).
+   */
   isImplausible(key: string, value: number): boolean {
+    const c3s = key === this.predictedC3S || key === this.actualC3S
+    if (c3s && (value < this.c3sRange.min || value > this.c3sRange.max)) return true
     return key === this.predictedC3S && value > this.predictedC3SMax
   }
 }

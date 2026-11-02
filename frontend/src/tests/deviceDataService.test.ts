@@ -594,6 +594,43 @@ describe('a device the platform refuses', () => {
   })
 })
 
+describe('C3S outside 0–80 %', () => {
+  it('is dropped for the laboratory and the predicted C3S, and the limits themselves are kept', () => {
+    for (const [key, v, gone] of [
+      ['FLSCLINKER:D18', 85.2, true],
+      ['FLSCLINKER:D18', -3.2, true],
+      ['FLSCLINKER:D18', 80, false],
+      ['FLSCLINKER:D18', 0, false],
+      ['FLSCLINKER:D18', 50.4, false],
+      ['JSW_C3S:D7', 120, true],
+      ['JSW_C3S:D7', -1, true],
+      ['JSW_C3S:D7', 79.9, false],
+      // Not a C3S: untouched.
+      ['FLSCLINKER:D24', 95, false],
+      ['FLSKILNFEED:D6', -2, false],
+    ] as const) {
+      expect([key, v, JSW.isImplausible(key, v)]).toEqual([key, v, gone])
+    }
+    // Adani keeps its stricter cap on predictions, and gets the same range on its lab C3S.
+    expect(ADANI.isImplausible('ADANI_LAB:D55', 51)).toBe(true)
+    expect(ADANI.isImplausible('ADANI_LAB:D58', 81)).toBe(true)
+    expect(ADANI.isImplausible('ADANI_LAB:D58', 51)).toBe(false)
+  })
+
+  it('never reaches the rows a chart is drawn from', () => {
+    const t = Date.parse('2026-10-16T15:00:00.000Z')
+    const rows = qualifyRows(JSW, 'FLSCLINKER', [
+      { t, values: { D18: 95.5, D24: 1.2 } },
+      { t: t + 1, values: { D18: -3.2 } },
+      { t: t + 2, values: { D18: 61.4 } },
+    ])
+    expect(rows).toEqual([
+      { t, values: { 'FLSCLINKER:D24': 1.2 } },
+      { t: t + 2, values: { 'FLSCLINKER:D18': 61.4 } },
+    ])
+  })
+})
+
 describe('rows of several devices', () => {
   it('qualifies every key by device and merges shared timestamps', () => {
     const t = Date.parse('2026-10-30T06:00:00Z')

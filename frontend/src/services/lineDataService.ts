@@ -7,7 +7,8 @@
  * devices that share a timestamp are merged into one row; a device that did not report at an
  * instant is simply absent from that row's keys.
  *
- * Readings the line says are impossible (`LineModel.isImplausible`: predicted C3S above 50 %)
+ * Readings the line says are impossible (`LineModel.isImplausible`: a C3S below 0 % or above 80 %, a
+ * prediction above the line's cap)
  * are dropped here, so no chart, table or figure downstream ever sees them.
  */
 

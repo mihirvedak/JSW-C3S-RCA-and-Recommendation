@@ -211,6 +211,12 @@ export interface LineSpec {
   shifts?: readonly ShiftDef[]
   /** Predicted C3S above this (%) is not a clinker value and is treated as missing. Default 50. */
   predictedC3SMax?: number
+  /**
+   * C3S readings (laboratory and predicted) outside this range (%) are not clinker values and are
+   * treated as missing everywhere: trend, histogram, compliance, KPIs, zone plots. Default 0–80.
+   * Applies on top of `predictedC3SMax`.
+   */
+  c3sRange?: { min: number; max: number }
   /** What the model writes, and where. For the record; the dashboard reads sensors only. */
   outputs?: { topic?: string; writes: readonly OutputSpec[] }
   /** Open points the plant still has to answer; shown nowhere, kept with the config. */

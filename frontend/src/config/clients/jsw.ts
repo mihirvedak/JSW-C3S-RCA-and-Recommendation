@@ -424,10 +424,11 @@ const KILN_LINE: LineSpec = {
     coal('D17'),
   ],
   /*
-   * Adani's cap of 50 % (its model occasionally emits impossible values) would drop Nandyal's
-   * Bogue + Ridge C3S if it runs high. 80 % is a physical ceiling for Bogue C3S; the plant's
-   * clinker target is 50 ± 2 % and it has stated no cap of its own (see notes).
+   * Plant request (2026-11-02): a laboratory or predicted C3S above 80 % or below 0 % is not a value
+   * and is not shown. Adani's extra cap on predictions (50 %) would drop Nandyal's Bogue + Ridge C3S
+   * if it ran high, so the prediction cap is the same 80 %.
    */
+  c3sRange: { min: 0, max: 80 },
   predictedC3SMax: 80,
   specLimits: SPEC_LIMITS,
   outputs: {
@@ -451,7 +452,7 @@ const KILN_LINE: LineSpec = {
     'Specification limits come from the targets in the quality table headers; no kiln-feed bin limit table was supplied, so the compliance table judges laboratory rows only.',
     'Shift pattern not supplied: the default A 06–14 / B 14–22 / C 22–06 is used.',
     'The tag list gives the device of "Low-NOx ash used" as JSW_S5 (the writer); it is read as JSW_C3S:D2 here.',
-    'No plausibility cap for predicted C3S was supplied: values above 80 % are treated as missing (Adani uses 50 %).',
+    'C3S readings (laboratory and predicted) above 80 % or below 0 % are treated as missing (plant request, 2026-11-02).',
     'FLSBALLMILL:D161 "Remarks" is free text and is not listed as a sensor.',
   ],
 }

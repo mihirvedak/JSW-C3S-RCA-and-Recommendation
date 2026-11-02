@@ -604,12 +604,18 @@ At the plant's request nothing after **28 Aug 2026, 03:00 plant time** is loaded
 - RCA events and shift summaries (#4) after it are left out; shifts count as completed only if they
   ended by it.
 
-## Impossible readings (2026-10-29)
+## Impossible readings (2026-10-29, extended 2026-11-02)
 
-Predicted C3S (`D55` on each line's lab device, e.g. `ADANI_LAB`) above **50 %** is dropped as it is
-read (`LineModel.isImplausible`, `predictedC3SMax` on the line spec, applied in `services/lineDataService.ts` on every #2 / #3 result). It is treated as a
-missing prediction everywhere: C3S trend, histogram, compliance, zone plots, 48-hour timeline, shift
-figures. `ADANI_RAW:D55` is a different tag and is not affected.
+A C3S reading that cannot be a clinker value is dropped as it is read (`LineModel.isImplausible`,
+applied in `services/lineDataService.ts` on every #2 / #3 result), so it is treated as missing
+everywhere: C3S trend, histogram, compliance, zone plots, 48-hour timeline, KPIs, shift figures.
+
+- **Every line: a laboratory or predicted C3S below 0 % or above 80 %** (`LineSpec.c3sRange`, default
+  0–80; JSW plant request 2026-11-02, after outliers stretched the trend's axis to 0–100). 0 % and
+  80 % themselves are kept. Other tags are untouched.
+- **Adani: a predicted C3S above 50 %** (`predictedC3SMax`, plant request 2026-10-29); JSW's cap is 80 %.
+
+The RCA insight's own event values are not filtered: on JSW they all lie between 25 and 60 %.
 
 ## Load order and request count (2026-10-28)
 

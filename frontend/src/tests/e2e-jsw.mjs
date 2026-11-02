@@ -43,7 +43,8 @@ const KILN_FEED_STOP = END - 15 * 24 * HOUR
 /** Every device of the JSW line, by id: the samples it carries, as a function of the window asked for. */
 const RAW = {
   // Clinker XRD/XRF: a sample about every 2 h. D18 lab C3S, D24 free lime, D19 SO3.
-  FLSCLINKER: (s, e) => rows(s, e, 2 * HOUR, (t) => ({ D18: +wave(t, 61, 2, 36).toFixed(2), D24: +wave(t, 1.4, 0.5, 20).toFixed(2), D19: 0.9, D6: 21.8, D8: 5.4, D11: 3.9, D15: 65.1, D5: 93.5, D13: 2.25, D10: 1.4, D16: 18.2, D14: 7.6, D21: 11.9 })),
+  // Two impossible lab C3S readings, as the plant has seen them: 95.5 % and −3.2 %.
+  FLSCLINKER: (s, e) => rows(s, e, 2 * HOUR, (t) => ({ D18: t === END - 4 * HOUR ? 95.5 : t === END - 10 * HOUR ? -3.2 : +wave(t, 61, 2, 36).toFixed(2), D24: +wave(t, 1.4, 0.5, 20).toFixed(2), D19: 0.9, D6: 21.8, D8: 5.4, D11: 3.9, D15: 65.1, D5: 93.5, D13: 2.25, D10: 1.4, D16: 18.2, D14: 7.6, D21: 11.9 })),
   // Kiln feed XRF: every 2 h, offset, and — as reported for Nandyal — nothing after 15 days before the
   // newest C3S. D7 SiO2 (a D7 that is NOT the predicted C3S). D6 LSF, D11 SM, D10 AM.
   FLSKILNFEED: (s, e) => rows(s, Math.min(e, KILN_FEED_STOP) - 17 * MIN, 2 * HOUR, (t) => ({ D14: 43.1, D7: 13.6, D8: 3.2, D13: 2.1, D15: 1.9, D16: 0.3, D17: 0.2, D18: 0.6, D6: +wave(t, 100, 1.5, 30).toFixed(1), D11: 2.31, D10: 1.29 })),
@@ -62,7 +63,8 @@ const RAW = {
   JSWBMBCLRMTR_KC: (s, e) => rows(s, e, 24 * HOUR, () => ({ D18: 5120 })),
   JSWBMBCLRMTR_PC: (s, e) => rows(s, e, 24 * HOUR, () => ({ D18: 4980 })),
   // Model outputs: every 15 min. D7 predicted C3S, D5 the superseded physics C3S (hidden).
-  JSW_C3S: (s, e) => rows(s, e, 15 * MIN, (t) => ({ D0: 0.021, D1: 0.019, D2: 0.004, D3: 0.012, D4: 0.056, D5: 58.0, D6: 1.2, D7: +wave(t, 60.5, 2.2, 36).toFixed(2), D8: 0.3 })),
+  // And one impossible prediction, 120 %.
+  JSW_C3S: (s, e) => rows(s, e, 15 * MIN, (t) => ({ D0: 0.021, D1: 0.019, D2: 0.004, D3: 0.012, D4: 0.056, D5: 58.0, D6: 1.2, D7: t === END - 3 * HOUR ? 120 : +wave(t, 60.5, 2.2, 36).toFixed(2), D8: 0.3 })),
   // DCS devices: every minute. Only the named tags plus two unnamed ones, to exercise discovery.
   ABBKLN_A1: (s, e) => rows(s, e, MIN, (t) => ({ D154: +wave(t, 9.1, 0.4, 6).toFixed(2), D155: +wave(t, 7.8, 0.3, 5).toFixed(2), D156: 2.1, D7: 812 })),
   ABBBHPH_A1: (s, e) => rows(s, e, MIN, (t) => ({ D63: +wave(t, 410, 12, 8).toFixed(1), D1: 0.5 })),
@@ -336,6 +338,23 @@ await step('C3S Analysis: the 48-hour timeline classifies with JSW_C3S:D7 and FL
   if (notClassified > 20) throw new Error(`${notClassified} of 192 intervals unclassified: predictions or free lime not read from the JSW devices`)
   const stats = await page.locator('.stats').innerText()
   if (!stats.includes('Predicted C3S (Bogue + Ridge)') || !stats.includes('Clinker C3S (XRD)')) throw new Error(`KPI labels: ${stats}`)
+})
+
+await step('a C3S above 80 % or below 0 % is not drawn: the trend\u2019s axis stays inside 0–80', async () => {
+  const ticks = (await page.locator('.analysis .timeline .highcharts-yaxis-labels text').allTextContents()).map(Number).filter(Number.isFinite)
+  if (!ticks.length) throw new Error('no y-axis labels on the C3S trend')
+  if (Math.max(...ticks) > 80 || Math.min(...ticks) < 0) throw new Error(`the trend\u2019s axis reaches an impossible value: ${ticks.join(', ')}`)
+  // Nothing near the outliers survives: every plotted C3S is a plausible clinker value.
+  const ys = await page.evaluate(() => {
+    const out = []
+    for (const el of document.querySelectorAll('.analysis .timeline .highcharts-series-1 .highcharts-point')) out.push(el.getAttribute('aria-label') ?? '')
+    return out
+  })
+  if (ys.some((l) => /95\.5|-3\.2|120/.test(l))) throw new Error('an impossible C3S is still plotted')
+  await openTab('Executive View')
+  const bins = await page.locator('.panel', { hasText: 'C3S Distribution' }).locator('.highcharts-xaxis-labels text').allTextContents()
+  if (bins.some((b) => /^(9\d|1\d\d)|^-/.test(b.trim()))) throw new Error(`the histogram has a bin for an impossible value: ${bins.join(' | ')}`)
+  await openTab('C3S Analysis')
 })
 
 await step('lab quality groups the six laboratory devices by material, keeps the three D18s apart, hides the old physics C3S', async () => {
