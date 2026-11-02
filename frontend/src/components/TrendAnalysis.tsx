@@ -542,9 +542,12 @@ export function TrendAnalysis({
   // Thinned rows are one reading per 5 minutes; only a longer silence is a gap.
   const maxGapMs = (range.thinned || ownContext) && !showEventWindow ? 15 * MINUTE_MS : 5 * MINUTE_MS
 
-  // Laboratory samples are sparse, so their charts always cover the range (or, for an event outside
-  // it, the 96-hour look-back the event's own laboratory load covers), never the event window.
-  const labW: EventWindow = ownWindowOnly && eventMs != null ? { start: eventMs - LAB_LOOKBACK_MS, end: eventMs } : loaded
+  // Laboratory samples are sparse and loaded for the whole range (never shortened, unlike the minute
+  // process data, which covers at most its newest 7 days), so their charts always cover the whole
+  // selected range; for an event outside it, the 96-hour look-back its own laboratory load covers.
+  // Never the event window.
+  const labW: EventWindow =
+    ownWindowOnly && eventMs != null ? { start: eventMs - LAB_LOOKBACK_MS, end: eventMs } : { start: range.start, end: clampEnd(range.end) }
   const labRows = ownWindowOnly ? trends.labRows : rangeLab.rows
   const labLoading = ownWindowOnly ? trends.labLoading : rangeLab.loading
   const labError = ownWindowOnly ? trends.labError : rangeLab.error
@@ -563,8 +566,9 @@ export function TrendAnalysis({
         />
       )}
       <p className="muted small ltrend__foot">
-        The line&rsquo;s quality parameters over {ownWindowOnly ? `the ${LAB_LOOKBACK_MS / HOUR_MS} h up to the event` : 'the selected range'}, each
+        The line&rsquo;s quality parameters over {ownWindowOnly ? `the ${LAB_LOOKBACK_MS / HOUR_MS} h up to the event` : 'the whole selected range'}, each
         laboratory sample as a point and the line broken across gaps longer than the parameter&rsquo;s usual interval.
+        {!ownWindowOnly && range.fetchedStart != null ? ' (Process trends below cover the newest 7 days of the range.)' : ''}
         {eventMs != null ? ' The red line is the event; the ringed point is the last sample before it.' : ''} Drag across a chart to zoom in.
       </p>
     </Panel>

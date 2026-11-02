@@ -1725,10 +1725,13 @@ await step('over a range longer than 7 days, charts cover the loaded days, and a
 
   // The 18 Aug event is older than the loaded week: its own 7 days are loaded and charted.
   await page.locator('.etrend__picker select').selectOption(RCA_ZONE_RESULT._id)
-  await page.locator('.highcharts-plot-line-label', { hasText: 'Event 18 Aug 21:00' }).first().waitFor({ timeout: 15_000 })
+  // Wait on the process card itself: the laboratory cards cover the whole range, so they carry the
+  // event mark too, before the event's own 7 days of process data have loaded.
+  const card = page.locator('.etrend__card[data-trend="ADANI_RAW:D0"]')
+  await card.locator('.highcharts-plot-line-label', { hasText: 'Event 18 Aug 21:00' }).waitFor({ timeout: 15_000 })
+  await card.locator('.highcharts-series-0 .highcharts-graph').waitFor({ timeout: 15_000 })
   const note = await page.locator('.etrend__foot').innerText()
   if (!note.includes('the 7 days around the event (15 Aug, 09:00 – 22 Aug, 09:00)')) throw new Error(`event note: ${note}`)
-  const card = page.locator('.etrend__card[data-trend="ADANI_RAW:D0"]')
   const graph = await card.locator('.highcharts-series-0 .highcharts-graph').boundingBox()
   const lines = await card.locator('.highcharts-plot-line').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON()))
   const event = lines.find((r) => r.width <= 4 && r.height > 20)

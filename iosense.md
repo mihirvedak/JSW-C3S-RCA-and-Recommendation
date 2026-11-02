@@ -435,7 +435,8 @@ A third tab with two modes (2026-10-28):
 **Per line (2026-10-31).** A line may list the process tags it wants charted (`LineSpec.processTrends`;
 JSW lists its seven DCS tags) and the laboratory parameters (`LineSpec.labTrends`); without a list
 the mapped kiln-operation roles and lab roles are used (Adani). A **Laboratory Trends** panel charts
-the quality parameters over the selected range in both modes (never the 1.5 h event window: a
+the quality parameters over the **whole** selected range in both modes (fixed 2 Nov: they were clipped
+to the process data's newest 7 days, so a six-week range plotted 83 of ~500 clinker samples) (never the 1.5 h event window: a
 laboratory reports every hour or day), each sample a point, the line broken across gaps longer than
 2.5× the parameter's median interval; with an event open, the last sample before it is ringed.
 

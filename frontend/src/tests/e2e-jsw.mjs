@@ -521,6 +521,21 @@ await step('a six-week range draws the laboratory C3S on C3S Analysis, with hear
   await page.screenshot({ path: `${SHOTS}/jsw-04-six-weeks.png`, fullPage: true })
 })
 
+await step('Trend Analysis plots every laboratory sample of a six-week range, not only the newest 7 days', async () => {
+  // Still on the six-week range set above. Process trends cover its newest 7 days (minute data);
+  // the laboratory is loaded for the whole range and every card must plot all of it.
+  await openTab('Trend Analysis')
+  const card = (key) => page.locator('.panel', { hasText: 'Laboratory Trends' }).locator(`.ltrend__card[data-trend="${key}"]`)
+  await card('FLSCLINKER:D18').locator('.highcharts-point').first().waitFor({ timeout: 15_000 })
+  const lab = await card('FLSCLINKER:D18').locator('.highcharts-series-0 .highcharts-point').count()
+  if (lab < 400) throw new Error(`clinker C3S card should plot about 500 samples over six weeks, plots ${lab}`)
+  const pred = await card('JSW_C3S:D7').locator('.highcharts-series-0 .highcharts-point').count()
+  if (pred < 3500) throw new Error(`predicted C3S card should plot about 4000 predictions over six weeks, plots ${pred}`)
+  const ticks = await card('FLSCLINKER:D18').locator('.highcharts-xaxis-labels text').allTextContents()
+  if (!ticks.some((t) => /Sep/.test(t))) throw new Error(`the laboratory card's axis should start in September: ${ticks.join(' | ')}`)
+  await openTab('C3S Analysis')
+})
+
 await step('an RCA event outside the range still shows its lab C3S and the model prediction at it', async () => {
   // 30 Oct 10:00–11:30 plant time: both RCA events are earlier, and the only lab C3S in the range
   // (06:00 UTC) is more than 4 h after either. The 48-hour timeline still offers the events.

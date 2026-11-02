@@ -150,6 +150,9 @@ export function EventTrendChart({
         labels: { style: { color: COLOR.text, fontSize: '10px' } },
         startOnTick: false,
         endOnTick: false,
+        // A flat series (a constant set point, a repeated prediction) is never drawn on the plot edge.
+        minPadding: 0.08,
+        maxPadding: 0.08,
         // Keep the band and the flag line in view even when the readings sit far from them.
         softMin: band ? band.lo : undefined,
         softMax: flagAt ?? (band ? band.hi : undefined),
