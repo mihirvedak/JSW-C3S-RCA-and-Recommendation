@@ -1610,7 +1610,7 @@ await step('Trend Analysis draws actual and predicted C3S vs free lime over the 
   for (let i = 0; i < 2; i++) {
     const legend = await plots.nth(i).locator('.highcharts-legend-item text').allTextContents()
     if (legend.join('|') !== 'Underlimed|Overburnt|Good clinker|Under burnt|Overlimed') throw new Error(`legend: ${legend.join('|')}`)
-    if ((await plots.nth(i).locator('.highcharts-series.highcharts-polygon-series').count()) !== 5) throw new Error(`plot ${i} should fill five zones`)
+    if ((await plots.nth(i).locator('.highcharts-series.highcharts-polygon-series:not(.czone-target)').count()) !== 5) throw new Error(`plot ${i} should fill five zones`)
   }
   const counts = await plots.first().locator('.czone__counts').innerText()
   if (!/Good clinker\s*1/.test(counts) || !/Under burnt\s*1/.test(counts) || !/Underlimed\s*1/.test(counts)) throw new Error(`zone counts: ${counts}`)

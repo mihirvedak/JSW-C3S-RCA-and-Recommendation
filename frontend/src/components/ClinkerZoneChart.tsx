@@ -119,14 +119,17 @@ export function ClinkerZoneChart({
           }),
         ),
         {
-          type: 'line',
+          // An unfilled polygon, not a line: a line doubling back on itself is unsorted data to
+          // Highcharts (warning #15 in the console on every zone plot).
+          type: 'polygon',
           name: 'Target box',
+          className: 'czone-target',
           showInLegend: false,
           enableMouseTracking: false,
           color: COLOR.ink,
+          fillColor: 'transparent',
           lineWidth: 1.25,
-          marker: { enabled: false },
-          data: [[c3sLo, flLo], [c3sHi, flLo], [c3sHi, flHi], [c3sLo, flHi], [c3sLo, flLo]],
+          data: [[c3sLo, flLo], [c3sHi, flLo], [c3sHi, flHi], [c3sLo, flHi]],
           zIndex: 1,
         },
         {

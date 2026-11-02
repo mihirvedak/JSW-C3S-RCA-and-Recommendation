@@ -1,4 +1,6 @@
 import react from '@vitejs/plugin-react'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { constants as zc, brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib'
 import { defineConfig, loadEnv } from 'vite'
 import type { ProxyOptions } from 'vite'
@@ -40,6 +42,10 @@ export default defineConfig(({ mode }) => {
         // IOSENSE_LOG_BODIES=1 also prints the first 400 characters of each device-data answer, to see
         // the shape the connector returns for a device (values, strings, timestamps only, a refusal).
         const logBodies = env.IOSENSE_LOG_BODIES === '1'
+        // IOSENSE_DUMP_DIR=<dir> also writes each insight answer, inflated and whole, to <dir>: the
+        // insight's schema can then be read field by field. Insight results carry no credentials.
+        const dumpDir = env.IOSENSE_DUMP_DIR || ''
+        if (dumpDir) mkdirSync(dumpDir, { recursive: true })
         // The connector compresses its answers; the snippet is taken after inflating the first 64 KB.
         const inflateHead = (buf: Buffer, encoding: string | undefined): string => {
           try {
@@ -56,12 +62,17 @@ export default defineConfig(({ mode }) => {
             return `(could not inflate ${encoding}: ${err instanceof Error ? err.message : String(err)})`
           }
         }
+        const inflateAll = (buf: Buffer, encoding: string): Buffer =>
+          encoding === 'gzip' ? gunzipSync(buf) : encoding === 'br' ? brotliDecompressSync(buf) : encoding === 'deflate' ? inflateSync(buf) : buf
         p.on('proxyRes', (proxyRes, req) => {
           let bytes = 0
           const head: Buffer[] = []
+          const whole: Buffer[] = []
+          const dump = dumpDir !== '' && /insightResult/.test(req.url ?? '')
           let kept = 0
           proxyRes.on('data', (c: Buffer) => {
             bytes += c.length
+            if (dump) whole.push(c)
             if (logBodies && kept < 65536) {
               head.push(c)
               kept += c.length
@@ -71,6 +82,15 @@ export default defineConfig(({ mode }) => {
             const secs = ((Date.now() - (started.get(req) ?? Date.now())) / 1000).toFixed(1)
             const enc = String(proxyRes.headers['content-encoding'] ?? 'identity')
             console.log(`[proxy] ${req.method} ${req.url} -> ${proxyRes.statusCode} ${bytes} B ${secs} s ${enc}`)
+            if (dump) {
+              try {
+                const file = join(dumpDir, `insight-${Date.now()}.json`)
+                writeFileSync(file, inflateAll(Buffer.concat(whole), enc))
+                console.log(`[proxy-dump] ${req.url} -> ${file}`)
+              } catch (err) {
+                console.log(`[proxy-dump] failed: ${err instanceof Error ? err.message : String(err)}`)
+              }
+            }
             if (logBodies && /deviceData|insightResult/.test(req.url ?? '')) {
               console.log(`[proxy-body] ${req.url} :: ${inflateHead(Buffer.concat(head), enc).replace(/\s+/g, ' ')}`)
             }
