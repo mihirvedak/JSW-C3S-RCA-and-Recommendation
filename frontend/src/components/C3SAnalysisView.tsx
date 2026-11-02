@@ -39,6 +39,8 @@ const C3STimeline = lazy(() => import('./C3STimeline').then((m) => ({ default: m
 
 /** A laboratory C3S further than this from the event is not "its" sample. */
 const NEAREST_LAB_MS = 4 * HOUR_MS
+/** The model writes a prediction every 15 min; one further than this from the event is not "its" prediction. */
+const NEAREST_PREDICTION_MS = 30 * 60_000
 
 function Stat({
   label,
@@ -131,7 +133,7 @@ export function C3SAnalysisView({
   const trendEvents = useMemo<TrendEvent[]>(
     () =>
       d.rca.flatMap((f) =>
-        f.eventTime != null && f.c3s != null ? [{ id: f.id, t: f.eventTime, c3s: f.c3s, zone: shownZone(zoneOf(f)) }] : [],
+        f.eventTime != null && f.c3s != null ? [{ id: f.id, t: f.eventTime, c3s: f.c3s, zone: shownZone(zoneOf(f)), source: f.source }] : [],
       ),
     [d.rca],
   )
@@ -145,6 +147,16 @@ export function C3SAnalysisView({
       nearestWithin(extractSeries(eventLab.rows, ACTUAL_C3S), selected.eventTime, NEAREST_LAB_MS)
     return near ? { value: near.v, time: near.t } : null
   }, [selected, d.actual, eventLab.rows, ACTUAL_C3S])
+
+  // The model's prediction at the event, for an insight that runs on the laboratory C3S (JSW): from
+  // the range, else from the event's own look-back (the model device is read with the laboratory).
+  const modelCheck = useMemo(() => {
+    if (selected?.eventTime == null) return null
+    const near =
+      nearestWithin(d.predicted, selected.eventTime, NEAREST_PREDICTION_MS) ??
+      nearestWithin(extractSeries(eventLab.rows, PREDICTED_C3S), selected.eventTime, NEAREST_PREDICTION_MS)
+    return near ? { value: near.v, time: near.t } : null
+  }, [selected, d.predicted, eventLab.rows, PREDICTED_C3S])
 
   // The process tags the RCA names, with their reading at the event. Read from minute data
   // fetched for the event itself, not from the selected range's process data: the range may not
@@ -306,6 +318,7 @@ export function C3SAnalysisView({
             <RcaPanel
               finding={selected}
               labCheck={labCheck}
+              modelCheck={modelCheck}
               observed={observed}
               observedStatus={eventProcess.loading ? 'loading' : eventProcess.error ? 'error' : 'ready'}
               error={d.rcaError}

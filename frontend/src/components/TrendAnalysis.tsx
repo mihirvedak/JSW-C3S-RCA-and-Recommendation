@@ -26,6 +26,7 @@
 
 import { useMemo, useState } from 'react'
 import type { ClinkerTargets, RcaFinding } from '../services/rcaService'
+import { triggerIsLab } from '../services/rcaService'
 import type { EventTrends } from '../hooks/useEventTrends'
 import type { EventContext } from '../hooks/useEventContext'
 import { clampEnd } from '../config/dataWindow'
@@ -35,7 +36,7 @@ import { useLine } from '../config/LineContext'
 import type { LineModel } from '../config/lineModel'
 import { FILL_KEY, fillingStats, kilnOperationTrends, labTrends, rpmForFilling, tagTrend } from '../config/kilnTrends'
 import type { TrendDef } from '../config/kilnTrends'
-import { extractSeries, medianIntervalMs } from '../lib/series'
+import { extractSeries, medianIntervalMs, nearestWithin } from '../lib/series'
 import type { Point, TimestampRow } from '../lib/series'
 import { LAB_LOOKBACK_MS, SAMPLE_COUNT, lastSamples, spliceRows, trendWindow, valueAt } from '../lib/eventTrends'
 import type { EventWindow } from '../lib/eventTrends'
@@ -698,8 +699,19 @@ export function TrendAnalysis({
                   )}
                 </dd>
               </div>
+              {triggerIsLab(event) ? (
+                <div>
+                  <dt>Predicted C3S</dt>
+                  <dd title="The model's prediction nearest the event, within 30 min">
+                    {(() => {
+                      const p = eventMs == null ? null : nearestWithin(extractSeries(trends.labRows, line.predictedC3S), eventMs, 30 * MINUTE_MS)
+                      return p ? `${p.v.toFixed(2)}%` : trends.labLoading ? '…' : '—'
+                    })()}
+                  </dd>
+                </div>
+              ) : null}
               <div>
-                <dt>Predicted C3S (trigger)</dt>
+                <dt>{triggerIsLab(event) ? 'Lab C3S (trigger)' : 'Predicted C3S (trigger)'}</dt>
                 <dd>
                   {event.c3s == null ? '—' : `${event.c3s.toFixed(2)}%`}
                   {event.c3sGap == null ? null : (

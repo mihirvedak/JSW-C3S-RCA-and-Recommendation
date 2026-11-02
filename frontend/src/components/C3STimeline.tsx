@@ -33,6 +33,8 @@ export interface TrendEvent {
   t: number
   c3s: number
   zone: ZoneKey
+  /** Which C3S the event was run on; the marker sits on that series. */
+  source?: 'lab' | 'predicted' | null
 }
 
 /** Series colours; the same values as --c-actual / --c-pred / --c-low / --c-high in App.css. */
@@ -235,7 +237,7 @@ export function C3STimeline({
           const ev = eventByTime.get(x)
           const evRow = ev
             ? `<div style="margin-top:4px;border-top:1px solid ${COLOR.grid};padding-top:4px">` +
-              `<span style="color:${ZONE_STYLE[ev.zone].fill}">◆</span> RCA event · <b>${ev.zone}</b> · predicted ${ev.c3s.toFixed(2)}%</div>`
+              `<span style="color:${ZONE_STYLE[ev.zone].fill}">◆</span> RCA event · <b>${ev.zone}</b> · ${ev.source === 'lab' ? 'lab' : 'predicted'} ${ev.c3s.toFixed(2)}%</div>`
             : ''
           const m = matchedByTime.get(x)
           const extra = m

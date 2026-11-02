@@ -234,6 +234,73 @@ describe('fetchRcaFindings', () => {
   })
 })
 
+describe('the "C3S RCA Live" format (INS_c3snandyalrca)', () => {
+  // Result 0 of page 2 as the platform returned it on 2026-11-02, trimmed to the fields read.
+  const LIVE = {
+    _id: '6ae819f8be636bd66706a2a4',
+    insightID: 'INS_c3snandyalrca',
+    resultName: 'C3S RCA Live',
+    result: {
+      rca: {
+        raw: 'Problem: Underlimed: C3S 40.1 % (band 42.0 to 46.0 %), free lime 1.86 % (band 0.9 to 1.9 %).',
+        root_cause: {
+          Problem: 'Underlimed: C3S 40.1 % (band 42.0 to 46.0 %), free lime 1.86 % (band 0.9 to 1.9 %).',
+          'Cause 1': 'SHC is 706 kcal/kg against comparable 590 kcal/kg.',
+        },
+        recommendations: {
+          'Action 1': 'Improve SHC from 706 to 590 kcal/kg using the SHC optimizer.',
+          'Action 2': 'Increase TSR from 14.1 to 16.0%. Proceed to the SHC optimizer.',
+        },
+        outcome: { 'Result 1': 'Proceed to the SHC optimizer for the sized SHC / TSR move.' },
+        shc_optimizer: true,
+        source: 'lab C3S',
+        time: '2026-04-18 15:27:00',
+        lab_time: '2026-04-18 15:27:00',
+        batch_end: '2026-04-18 15:27:00',
+        zone: 'Underlimed',
+        direction: 'low',
+        c3s: 40.06,
+        fcao: 1.86,
+        level: 41.8,
+        c3s_gap: -3.94,
+        targets: { c3s: 44, c3s_band: [41.965, 46.035], free_lime: 1.43, free_lime_band: [0.9299999999999999, 1.93] },
+      },
+      as_of: '2026-04-18 15:27',
+    },
+    tags: ['C3S RCA Live', 'lower_than_target', 'JSW', 'SHC_Optimizer', 'true'],
+    invocationTime: '2026-04-18T09:57:00.000Z',
+  }
+
+  it('reads the event, says it was run on the lab C3S, and takes the targets its own lime level confirms', async () => {
+    mockFetch({ success: true, data: { data: [LIVE], totalCount: 1 } })
+    const [f] = (await fetchRcaFindings()).findings
+    expect([f.c3s, f.source, f.zone, f.freeLime, f.direction]).toEqual([40.06, 'lab', 'Underlimed', 1.86, 'low'])
+    expect(f.eventTime).toBe(Date.parse('2026-04-18T15:27:00+05:30'))
+    expect(f.targets).toEqual({
+      c3s: 44,
+      c3sBand: [41.965, 46.035],
+      freeLime: 1.43,
+      freeLimeBand: [0.9299999999999999, 1.93],
+      limeLevelK: 4.071,
+      limeLevelFreeLimeRef: 1.43,
+    })
+    expect(f.rootCauses.map((c) => c.label)).toEqual(['Problem', 'Cause 1'])
+    expect(f.recommendations).toHaveLength(2)
+  })
+
+  it('does not take targets whose lime level the standard form does not reproduce', async () => {
+    const off = structuredClone(LIVE)
+    off.result.rca.level = 45.0
+    mockFetch({ success: true, data: { data: [off], totalCount: 1 } })
+    expect((await fetchRcaFindings()).findings[0].targets).toBeNull()
+  })
+
+  it('reads an Adani result, which states no source, as run on the prediction', async () => {
+    mockFetch({ success: true, data: { data: [WITH_RECOMMENDATIONS], totalCount: 1 } })
+    expect((await fetchRcaFindings()).findings[0].source).toBeNull()
+  })
+})
+
 describe('malformed and degenerate responses', () => {
   it('counts unparseable results instead of dropping them silently', async () => {
     mockFetch({

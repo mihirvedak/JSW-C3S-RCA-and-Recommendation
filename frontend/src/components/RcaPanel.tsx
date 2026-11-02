@@ -9,6 +9,7 @@
  */
 
 import type { RcaFinding, RcaSeverity } from '../services/rcaService'
+import { triggerIsLab } from '../services/rcaService'
 import { Badge, EmptyState, ErrorState } from './primitives'
 import type { Tone } from './primitives'
 import { ZoneBadge } from './ZoneBadge'
@@ -48,6 +49,7 @@ const isProblem = (label: string) => /^problem\b/i.test(label.trim())
 export function RcaPanel({
   finding,
   labCheck,
+  modelCheck,
   observed,
   observedStatus,
   error,
@@ -58,6 +60,8 @@ export function RcaPanel({
 }: {
   finding: RcaFinding | null
   labCheck: LabCheck | null
+  /** The model's prediction nearest the event, shown when the insight ran on the laboratory C3S. */
+  modelCheck: LabCheck | null
   observed: readonly ObservedParameter[]
   /** Whether the minute process data around the event has loaded. */
   observedStatus: 'loading' | 'error' | 'ready'
@@ -125,18 +129,37 @@ export function RcaPanel({
             <dt>Event time</dt>
             <dd title={finding.eventTimeRaw ?? undefined}>{formatFull(finding.eventTime)}</dd>
           </div>
-          <div>
-            <dt>Predicted C3S</dt>
-            <dd title="The predicted C3S that triggered this RCA event">
-              {finding.c3s == null ? '—' : `${finding.c3s.toFixed(2)}%`}
-            </dd>
-          </div>
-          <div>
-            <dt>Actual C3S (lab)</dt>
-            <dd title={labCheck ? `Lab sample ${formatFull(labCheck.time)}` : 'No laboratory C3S within 4 h of the event'}>
-              {labCheck ? `${labCheck.value.toFixed(2)}%` : '—'}
-            </dd>
-          </div>
+          {triggerIsLab(finding) ? (
+            <>
+              <div>
+                <dt>Lab C3S (trigger)</dt>
+                <dd title="The laboratory C3S this RCA was run on (the insight states its source: lab C3S)">
+                  {finding.c3s == null ? '—' : `${finding.c3s.toFixed(2)}%`}
+                </dd>
+              </div>
+              <div>
+                <dt>Predicted C3S</dt>
+                <dd title={modelCheck ? `Model prediction at ${formatFull(modelCheck.time)}` : 'No model prediction within 30 min of the event'}>
+                  {modelCheck ? `${modelCheck.value.toFixed(2)}%` : '—'}
+                </dd>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <dt>Predicted C3S</dt>
+                <dd title="The predicted C3S that triggered this RCA event">
+                  {finding.c3s == null ? '—' : `${finding.c3s.toFixed(2)}%`}
+                </dd>
+              </div>
+              <div>
+                <dt>Actual C3S (lab)</dt>
+                <dd title={labCheck ? `Lab sample ${formatFull(labCheck.time)}` : 'No laboratory C3S within 4 h of the event'}>
+                  {labCheck ? `${labCheck.value.toFixed(2)}%` : '—'}
+                </dd>
+              </div>
+            </>
+          )}
           <div>
             <dt>Free lime</dt>
             <dd title="Free lime of the last laboratory sample before the event, as the insight reports it">

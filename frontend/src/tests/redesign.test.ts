@@ -24,6 +24,7 @@ function finding(over: Partial<RcaFinding>): RcaFinding {
     eventTimeRaw: null,
     batchEnd: null,
     c3s: null,
+    source: null,
     direction: null,
     zone: null,
     c3sGap: null,

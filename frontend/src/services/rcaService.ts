@@ -47,14 +47,22 @@ export interface ClinkerTargets {
   limeLevelFreeLimeRef: number
 }
 
+/**
+ * What the insight's `c3s` is. JSW's insight says so (`source: "lab C3S"`: every result is run on a
+ * laboratory sample, at the lab sample's time); Adani's says nothing and runs on the prediction.
+ */
+export type TriggerSource = 'lab' | 'predicted'
+
 export interface RcaFinding {
   id: string
   /** Event time reported by the insight (plant-local string, normalised to epoch ms). */
   eventTime: number | null
   eventTimeRaw: string | null
   batchEnd: number | null
-  /** C3S value the RCA was run against. */
+  /** C3S value the RCA was run against: the laboratory C3S or the prediction, as `source` says. */
   c3s: number | null
+  /** Which C3S `c3s` is. Null when the insight does not say (Adani): read as the prediction. */
+  source: TriggerSource | null
   direction: 'low' | 'high' | string | null
   /** Clinker zone the insight classified the event into, e.g. "Overlimed", "Unburnt". */
   zone: string | null
@@ -210,6 +218,26 @@ function severityOf(label: string, text: string): RcaSeverity {
   return m ? (m[1].toLowerCase() as 'cause' | 'watch') : null
 }
 
+/** The insight's `c3s` is the laboratory C3S, by its own statement. */
+export const triggerIsLab = (f: Pick<RcaFinding, 'source'>): boolean => f.source === 'lab'
+
+function parseSource(v: unknown): TriggerSource | null {
+  const s = asString(v)
+  if (!s) return null
+  if (/\blab/i.test(s)) return 'lab'
+  if (/pred|model/i.test(s)) return 'predicted'
+  return null
+}
+
+/**
+ * The Bogue factor of CaO in C3S: free lime left in the clinker is lime that did not become C3S, so the
+ * C3S the clinker would have at the reference free lime is C3S + 4.071 × (free lime − reference).
+ */
+export const BOGUE_CAO_FACTOR = 4.071
+
+/** How far the insight's own lime level may sit from that form and still be taken as using it. */
+const LIME_LEVEL_TOLERANCE = 0.06
+
 function asBand(v: unknown): [number, number] | null {
   if (!Array.isArray(v) || v.length !== 2) return null
   const [lo, hi] = v.map(asNumber)
@@ -218,8 +246,10 @@ function asBand(v: unknown): [number, number] | null {
 
 /**
  * Targets plus the lime-level formula, read from the insight's own definition
- * ("lime level = C3S + 4.071 x (free lime - 1.5), …"). Without the formula the zones cannot
- * be drawn, so a result missing either part has no targets.
+ * ("lime level = C3S + 4.071 x (free lime - 1.5), …"). An insight that writes no definition but
+ * reports its lime level (`level`, JSW) is taken as using C3S + 4.071 × (free lime − target free
+ * lime) only when that reproduces its level for this result; on all 584 JSW results it does, to
+ * 0.03. Otherwise the zones cannot be drawn, and the result has no targets.
  */
 function parseTargets(rca: Record<string, unknown>): ClinkerTargets | null {
   const t = rca.targets
@@ -233,15 +263,22 @@ function parseTargets(rca: Record<string, unknown>): ClinkerTargets | null {
   const m = def
     ? /c3s\s*\+\s*(\d+(?:\.\d+)?)\s*[x×*]\s*\(\s*free lime\s*[-−]\s*(\d+(?:\.\d+)?)\s*\)/i.exec(def)
     : null
-  if (c3s == null || freeLime == null || !c3sBand || !freeLimeBand || !m) return null
-  return {
-    c3s,
-    c3sBand,
-    freeLime,
-    freeLimeBand,
-    limeLevelK: Number(m[1]),
-    limeLevelFreeLimeRef: Number(m[2]),
+  if (c3s == null || freeLime == null || !c3sBand || !freeLimeBand) return null
+  if (m) {
+    return { c3s, c3sBand, freeLime, freeLimeBand, limeLevelK: Number(m[1]), limeLevelFreeLimeRef: Number(m[2]) }
   }
+  const level = asNumber(rca.level)
+  const eventC3s = asNumber(rca.c3s)
+  const eventFl = asNumber(rca.fcao)
+  if (
+    level != null &&
+    eventC3s != null &&
+    eventFl != null &&
+    Math.abs(eventC3s + BOGUE_CAO_FACTOR * (eventFl - freeLime) - level) <= LIME_LEVEL_TOLERANCE
+  ) {
+    return { c3s, c3sBand, freeLime, freeLimeBand, limeLevelK: BOGUE_CAO_FACTOR, limeLevelFreeLimeRef: freeLime }
+  }
+  return null
 }
 
 const SHIFT_START = /^(shift_)?(start|from|window_start|start_time)$/i
@@ -332,6 +369,7 @@ function parseFinding(raw: RawResult, index: number): RcaFinding | null {
     eventTimeRaw: asString(rca.time),
     batchEnd: parsePlantTime(rca.batch_end),
     c3s,
+    source: parseSource(rca.source),
     direction,
     zone,
     c3sGap: asNumber(rca.c3s_gap),

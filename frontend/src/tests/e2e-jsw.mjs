@@ -98,24 +98,31 @@ const DEVICES = Object.fromEntries(Object.keys(RAW).map((d) => [d, live(d)]))
 
 /* ------------------------------ synthetic insight results ------------------------------ */
 
-const LIME = 'lime level = C3S + 4.071 x (free lime - 1.5), the C3S the clinker would have at the target free lime'
-const targets = { c3s: 61, c3s_band: [59, 63], lime_level: 61, free_lime: 1.5, free_lime_band: [1.0, 2.0] }
+/*
+ * In the format INS_c3snandyalrca returns ("C3S RCA Live", seen whole on 2026-11-02): run on the
+ * laboratory C3S (`source: "lab C3S"`, time = lab_time), targets without a written lime-level
+ * formula, and the lime level itself in `level` (= C3S + 4.071 × (free lime − target free lime)).
+ */
+const targets = { c3s: 61, c3s_band: [59, 63], free_lime: 1.5, free_lime_band: [1.0, 2.0] }
 
 const event = (id, ms, zone, c3s, fcao, extra) => ({
   _id: id,
   insightID: 'INS_c3snandyalrca',
-  resultName: 'C3S RCA Action',
+  resultName: 'C3S RCA Live',
   result: {
     rca: {
+      raw: `Problem: ${zone}: C3S ${c3s} % (band 59.0 to 63.0 %), free lime ${fcao} % (band 1.0 to 2.0 %).`,
+      source: 'lab C3S',
       time: plant(ms),
-      batch_end: plant(ms + 15 * MIN),
+      lab_time: plant(ms),
+      batch_end: plant(ms),
       c3s,
       c3s_gap: +(c3s - targets.c3s).toFixed(2),
       fcao,
+      level: +(c3s + 4.071 * (fcao - targets.free_lime)).toFixed(2),
       direction: c3s < targets.c3s ? 'low' : 'high',
       zone,
       targets,
-      lime_level_definition: LIME,
       primary_cause: null,
       confirmed_cause: false,
       root_cause: {
@@ -132,7 +139,7 @@ const event = (id, ms, zone, c3s, fcao, extra) => ({
     },
     as_of: plant(ms + 20 * MIN),
   },
-  tags: [],
+  tags: ['C3S RCA Live', c3s < targets.c3s ? 'lower_than_target' : 'higher_than_target', 'JSW'],
   invocationTime: iso(ms + 20 * MIN),
 })
 
@@ -368,6 +375,19 @@ await step('lab quality groups the six laboratory devices by material, keeps the
   if (!model.some(([k]) => k === 'JSW_C3S:D7')) throw new Error('predicted C3S should be listed under model outputs')
 })
 
+await step('an insight run on the laboratory C3S is labelled so, and the RCA panel shows the model\u2019s prediction at the event', async () => {
+  const meta = await page.locator('.panel', { hasText: 'Root Cause Analysis' }).locator('.rca__meta').innerText()
+  if (!/LAB C3S \(TRIGGER\)\s*58\.40%/i.test(meta)) throw new Error(`the trigger should be labelled as the lab C3S: ${meta.replace(/\s+/g, ' ')}`)
+  const pred = /PREDICTED C3S\s*([\d.]+)%/i.exec(meta)
+  if (!pred) throw new Error(`the model prediction at the event should be shown: ${meta.replace(/\s+/g, ' ')}`)
+  // JSW_C3S:D7 at the event time (END − 7 h), as the simulated model writes it.
+  const want = +(60.5 + 2.2 * Math.sin(((END - 7 * HOUR) / HOUR / 36) * 2 * Math.PI)).toFixed(2)
+  if (Math.abs(Number(pred[1]) - want) > 0.011) throw new Error(`predicted C3S at the event should be ${want}, shows ${pred[1]}`)
+  // Targets come from the insight although it writes no lime-level formula: the band is drawn.
+  const legend = await page.locator('.analysis .legend').innerText()
+  if (!/Target band 59–63%, target 61 · from RCA insight/.test(legend)) throw new Error(`the insight's target band should be drawn: ${legend}`)
+})
+
 await step('the RCA panel reads kiln coal and AFR at the event from the DCS devices', async () => {
   const panel = page.locator('.panel', { hasText: 'Root Cause Analysis' })
   await panel.locator('.rca__params').waitFor({ timeout: 15_000 })
@@ -408,6 +428,7 @@ await step('Trend Analysis shows only the kiln trends JSW has tags for, and says
   if (!lsf.includes('No samples for this parameter in the selected range')) throw new Error(`stopped lab feed should be stated: ${lsf.replace(/\s+/g, ' ')}`)
   const zones = await page.locator('.czones').innerText()
   if (!zones.includes('Clinker C3S (XRD)') || !zones.includes('Clinker free lime')) throw new Error(`zone plot titles: ${zones.slice(0, 200)}`)
+  if (!zones.includes('lime level = C3S + 4.071 × (free lime − 1.5)')) throw new Error(`zones should be drawn from the insight's targets: ${zones.slice(0, 300)}`)
 })
 await step('opening an event adds the RCA-named JSW tags, labelled with the insight wording', async () => {
   const picker = page.locator('.etrend__picker select')
@@ -474,7 +495,7 @@ await step('a six-week range draws the laboratory C3S on C3S Analysis, with hear
   await page.screenshot({ path: `${SHOTS}/jsw-04-six-weeks.png`, fullPage: true })
 })
 
-await step('an RCA event outside the range still shows its laboratory C3S in the RCA panel', async () => {
+await step('an RCA event outside the range still shows its lab C3S and the model prediction at it', async () => {
   // 30 Oct 10:00–11:30 plant time: both RCA events are earlier, and the only lab C3S in the range
   // (06:00 UTC) is more than 4 h after either. The 48-hour timeline still offers the events.
   await setRange('2026-10-30T10:00', '2026-10-30T11:30')
@@ -487,15 +508,19 @@ await step('an RCA event outside the range still shows its laboratory C3S in the
   await page
     .waitForFunction(
       () => {
-        const cell = [...document.querySelectorAll('.rca__meta div')].find((e) => e.textContent?.includes('Actual C3S (lab)'))
-        return cell != null && /\d+\.\d{2}%/.test(cell.textContent ?? '')
+        // The insight runs on the lab C3S, so the trigger is the lab value and the prediction is read from
+        // the event's own look-back (the range holds no prediction within 30 min of the event).
+        const cells = [...document.querySelectorAll('.rca__meta div')]
+        const lab = cells.find((e) => e.textContent?.includes('Lab C3S (trigger)'))
+        const pred = cells.find((e) => /^Predicted C3S/.test(e.textContent ?? ''))
+        return lab != null && pred != null && /\d+\.\d{2}%/.test(lab.textContent ?? '') && /\d+\.\d{2}%/.test(pred.textContent ?? '')
       },
       null,
       { timeout: 15_000 },
     )
     .catch(async () => {
       const txt = await rca.locator('.rca__meta').innerText()
-      throw new Error(`actual C3S for an event outside the range should come from its own laboratory look-back: ${txt.replace(/\s+/g, ' ')}`)
+      throw new Error(`lab C3S and the model prediction should show for an event outside the range: ${txt.replace(/\s+/g, ' ')}`)
     })
 })
 

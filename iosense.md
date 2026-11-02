@@ -110,6 +110,31 @@ Consequences in the app:
 - The Vite proxy logs every proxied answer (`[proxy] GET … -> status bytes seconds`) and sets no
   proxy-side timeout, so the connector's behaviour can be read from the server log without a browser.
 
+## JSW RCA insight schema, "C3S RCA Live" (read whole, 2026-11-02)
+
+`INS_c3snandyalrca`: 584 results, all `resultName: "C3S RCA Live"`, event times 1 Jan → 16 Oct 2026
+(plant-local `YYYY-MM-DD HH:mm:ss`, = `invocationTime` + 5 h 30 m). `result.rca` keys: `raw`,
+`statement`, `root_cause` (`Problem`, `Cause n`), `recommendations` (`Action n`), `outcome`
+(`Result n`), `shc_optimizer` (true on all), `shc_optimizer_section` / `_label`, **`source: "lab C3S"`**,
+`time` = `lab_time` = `batch_end`, `zone` (Overlimed 302, Underlimed 261, Overburnt 15, Under burnt 6),
+`direction`, `c3s`, `fcao`, **`level`** (lime level), `c3s_gap`, `do`, `why`, `result`, `targets`
+(`c3s` 44, `c3s_band` [41.965, 46.035], `free_lime` 1.43, `free_lime_band` [0.93, 1.93]).
+
+Differences from Adani's `INS_df1b3c1a11de`, and what the app does:
+- **Run on the laboratory C3S, not the prediction.** `c3s` is the lab value at the lab sample's time.
+  The app reads `source` (`RcaFinding.source`); for a lab-run event the RCA panel shows "Lab C3S
+  (trigger)" and the model's prediction nearest the event (within 30 min, from the range or the event's
+  own look-back), the trend tooltip says "lab", and the event is marked on the laboratory zone plot.
+- **No `lime_level_definition`.** Targets were discarded, which switched off the zone plots, the C3S
+  band and the 48-hour classification for JSW. The app now takes C3S + 4.071 × (free lime − target
+  free lime) when it reproduces the insight's own `level` (within 0.06): it does on all 584 results
+  (max difference 0.024), and the resulting zones match the insight's `zone` on 583 of 584.
+- Checked by running the app's parser over the three live pages: 584 results, 0 malformed, all with
+  targets, source and event time.
+
+The model output `JSW_C3S:D7` has been **exactly 42.256 every 15 minutes since 17 Oct**: its laboratory
+inputs stopped on 16 Oct and it repeats its last result. Predictions after 16 Oct are not real.
+
 ## Data sources panel and per-device failures (2026-11-01)
 
 A line now loads each device on its own (three at a time, `services/lineDataService.ts`): a device

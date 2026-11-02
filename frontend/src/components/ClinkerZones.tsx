@@ -5,13 +5,14 @@
  *   - Predicted: the line's predicted C3S against the free lime of the last usable laboratory
  *     sample, since free lime itself is not predicted.
  *
- * Both use the insight's targets. RCA events are triggered on predicted C3S: the insight's
- * `c3s` is the predicted value and `fcao` the free lime of the last usable lab, so the selected
- * event is marked on the predicted plot.
+ * Both use the insight's targets. The selected RCA event is marked on the plot of the C3S it was
+ * run on: the laboratory plot when the insight says its source is the lab C3S (JSW), else the
+ * predicted plot (Adani, whose `c3s` is the prediction and `fcao` the last usable lab free lime).
  */
 
 import { useMemo } from 'react'
 import type { ClinkerTargets, RcaFinding } from '../services/rcaService'
+import { triggerIsLab } from '../services/rcaService'
 import type { TimestampRow } from '../lib/series'
 import { pairActual, pairPredicted, LAST_USABLE_LAB_MS, SAME_SAMPLE_MS } from '../lib/clinkerZones'
 import { extractSeries } from '../lib/series'
@@ -56,6 +57,7 @@ export function ClinkerZones({
         : null,
     [selected],
   )
+  const onLab = selected != null && triggerIsLab(selected)
 
   if (!targets) {
     return (
@@ -93,7 +95,7 @@ export function ClinkerZones({
               pointName="Lab sample"
               xTitle="C3S %"
               yTitle={`${flLabel} %`}
-              marker={null}
+              marker={onLab ? marker : null}
             />
           )}
           {unpairedActual > 0 ? (
@@ -121,7 +123,7 @@ export function ClinkerZones({
               pointName="Prediction"
               xTitle="C3S %"
               yTitle={`${flLabel} % of the last usable lab (not predicted)`}
-              marker={marker}
+              marker={onLab ? null : marker}
             />
           )}
           {unpairedPredicted > 0 ? (
@@ -134,7 +136,11 @@ export function ClinkerZones({
       </div>
       <p className="muted small">
         Samples from {scope}.{' '}
-        {marker ? 'The red diamond is the selected RCA event, which is triggered on predicted C3S. ' : ''}
+        {marker
+          ? onLab
+            ? 'The red diamond is the selected RCA event, which the insight ran on the laboratory C3S. '
+            : 'The red diamond is the selected RCA event, which is triggered on predicted C3S. '
+          : ''}
         Each prediction is paired with the newest laboratory free lime up to{' '}
         {LAST_USABLE_LAB_MS / HOUR_MS} h before it. The black rectangle is the target box; the
         diagonals are lines of constant lime level.
