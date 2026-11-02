@@ -87,6 +87,7 @@ export function C3SAnalysisView({
   targets,
   timeline,
   eventProcess,
+  eventLab,
   onOpenTrends,
 }: {
   d: DashboardData
@@ -97,6 +98,8 @@ export function C3SAnalysisView({
   timeline: Timeline48Data
   /** Minute process data around the selected event (1 h before to 30 min after). */
   eventProcess: { rows: readonly TimestampRow[]; loading: boolean; error: SectionError | null }
+  /** Laboratory data over the 96 h up to the selected event, which may lie outside the range. */
+  eventLab: { rows: readonly TimestampRow[]; loading: boolean }
   onOpenTrends: () => void
 }) {
   const line = d.line
@@ -133,11 +136,15 @@ export function C3SAnalysisView({
     [d.rca],
   )
 
+  // The laboratory C3S nearest the event: from the range when it holds one, else from the event's own
+  // laboratory look-back (an event picked from an older range or the insight may lie outside it).
   const labCheck = useMemo(() => {
     if (selected?.eventTime == null) return null
-    const near = nearestWithin(d.actual, selected.eventTime, NEAREST_LAB_MS)
+    const near =
+      nearestWithin(d.actual, selected.eventTime, NEAREST_LAB_MS) ??
+      nearestWithin(extractSeries(eventLab.rows, ACTUAL_C3S), selected.eventTime, NEAREST_LAB_MS)
     return near ? { value: near.v, time: near.t } : null
-  }, [selected, d.actual])
+  }, [selected, d.actual, eventLab.rows, ACTUAL_C3S])
 
   // The process tags the RCA names, with their reading at the event. Read from minute data
   // fetched for the event itself, not from the selected range's process data: the range may not

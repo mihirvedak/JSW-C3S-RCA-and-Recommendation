@@ -333,6 +333,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               targets={zoneTargets}
               timeline={timeline}
               eventProcess={{ rows: trends.processRows, loading: trends.processLoading, error: trends.processError }}
+              eventLab={{ rows: trends.labRows, loading: trends.labLoading }}
               onOpenTrends={() => {
                 // Trend Analysis opens on this event: the range's trends with its RCA analysis.
                 setTrendEventId(selected?.id ?? null)

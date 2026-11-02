@@ -80,7 +80,22 @@ only live observations):
   So every laboratory feed stopped reaching the platform on 16 Oct while the model and the DCS went
   on — that, not the dashboard, is why no actual C3S shows in any recent window.
 
+- **2 Nov** (inflated bodies): **every non-DCS device sends an `RSSI` heartbeat row every minute**
+  (`{"time": …, "RSSI": "-1"}`), whether or not the laboratory sent anything; the DCS rows carry
+  gateway fields beside the tags (`"Status": "2", "RSSI": "22"`). Real clinker samples sit between
+  the heartbeats: `{"time":"2026-10-16T15:00:00.000Z","D18":"38.00825999999995","D24":"1.21",…}`.
+  `JSWCALN_A1` (calciner temperatures) carries one value every 1–2 h on the hour, as text, and
+  stopped on 16 Oct with the laboratory: it is read as a laboratory device.
+
 Consequences in the app:
+- Only sensor ids (D-tags) are readings; a row with none (a heartbeat) is dropped as it is parsed, and
+  a laboratory device keeps only the sensors its spec lists (`fetchRange` `keep`, `keepFor` in
+  `services/lineDataService.ts`). A two-month laboratory range was about a million rows in the
+  browser and took many seconds to draw the C3S trend; it is now the real samples only. Data sources
+  counts real samples, so a stopped laboratory reads "Stopped before range", not "Data in range".
+- The RCA panel's "Actual C3S (lab)" falls back to the event's own 96-hour laboratory look-back when
+  the selected range holds no lab C3S within 4 h of the event (an event picked from the 48-hour
+  timeline or an older range).
 - Readings sent as numeric strings are read as numbers (`asReading` in `services/deviceDataService.ts`);
   before 1 Nov they were discarded, so the laboratory devices looked empty even for ranges that held data.
 - A banner names every laboratory device whose newest reading is more than a day before the window's

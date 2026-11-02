@@ -133,7 +133,7 @@ export function RcaPanel({
           </div>
           <div>
             <dt>Actual C3S (lab)</dt>
-            <dd title={labCheck ? `Lab sample ${formatFull(labCheck.time)}` : 'No laboratory C3S within ±4 h in the selected range'}>
+            <dd title={labCheck ? `Lab sample ${formatFull(labCheck.time)}` : 'No laboratory C3S within 4 h of the event'}>
               {labCheck ? `${labCheck.value.toFixed(2)}%` : '—'}
             </dd>
           </div>

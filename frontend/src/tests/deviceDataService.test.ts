@@ -430,6 +430,42 @@ describe('impossible readings', () => {
   })
 })
 
+describe('heartbeats and gateway fields', () => {
+  // As the platform answered for FLSCLINKER and ABBKLN_A1 on 2026-11-01.
+  const CLINKER = {
+    success: true,
+    data: [
+      { time: '2026-10-16T15:00:00.000Z', D18: '38.00825999999995', D24: '1.21', D26: '1360.00' },
+      { time: '2026-10-16T14:59:08.854Z', RSSI: '-1' },
+      { time: '2026-10-16T14:58:08.855Z', RSSI: '-1' },
+    ],
+  }
+  const DCS = { success: true, data: [{ time: '2026-11-01T19:26:32.243Z', Status: '2', D0: '-40.292', RSSI: '22', D154: '10.863' }] }
+
+  it('drops heartbeat rows and reads only sensor ids, by default', async () => {
+    mockFetch(CLINKER)
+    const rows = await fetchRange('FLSCLINKER', 1, 2)
+    expect(rows).toEqual([{ t: Date.parse('2026-10-16T15:00:00.000Z'), values: { D18: 38.00825999999995, D24: 1.21, D26: 1360 } }])
+    mockFetch(DCS)
+    expect((await fetchRange('ABBKLN_A1', 1, 2))[0].values).toEqual({ D0: -40.292, D154: 10.863 })
+  })
+
+  it('reads only the listed sensors of a laboratory device, and every D-tag of a process device', async () => {
+    mockFetch({ success: true, data: [{ time: '2026-10-16T15:00:00.000Z', D18: '38.0', D99: '7', RSSI: '-1' }] })
+    const lab = await fetchDevicesRange(JSW, ['FLSCLINKER'], 1, 2)
+    expect(lab[0].values).toEqual({ 'FLSCLINKER:D18': 38 })
+    mockFetch(DCS)
+    const proc = await fetchDevicesRange(JSW, ['ABBKLN_A1'], 1, 2)
+    expect(proc[0].values).toEqual({ 'ABBKLN_A1:D0': -40.292, 'ABBKLN_A1:D154': 10.863 })
+  })
+
+  it('counts only real samples in a device\'s outcome, so a stopped laboratory reads as empty', async () => {
+    mockFetch({ success: true, data: [{ time: '2026-11-01T16:29:23.112Z', RSSI: '-1' }, { time: '2026-11-01T16:28:23.112Z', RSSI: '-1' }] })
+    const { outcomes } = await fetchDevicesRangeDetailed(JSW, ['FLSKILNFEED'], 1, 2)
+    expect(outcomes[0]).toMatchObject({ devID: 'FLSKILNFEED', rows: 0, newest: null, error: null })
+  })
+})
+
 describe('readings sent as text', () => {
   it('reads a numeric string as the number it is, in ranges and latest values, and nothing looser', async () => {
     mockFetch({
@@ -547,7 +583,7 @@ describe('a device the platform refuses', () => {
 
   it('is fatal only when every device is refused', async () => {
     mockFetch({ success: false, errors: ['User Device not added to your account'] })
-    await expect(fetchDevicesRange(JSW, JSW.processDevices, 1, 2)).rejects.toThrow(/None of the 4 devices could be read.*ABBKLN_A1: User Device not added/)
+    await expect(fetchDevicesRange(JSW, JSW.processDevices, 1, 2)).rejects.toThrow(/None of the 3 devices could be read.*ABBKLN_A1: User Device not added/)
   })
 
   it('shows up in the newest-reading probe the same way', async () => {

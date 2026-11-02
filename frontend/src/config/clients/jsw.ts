@@ -288,14 +288,19 @@ const AFR_DCS: DeviceSpec = {
   sensors: [{ id: 'D2', name: 'Solid AFR', unit: 't/h', group: 'calciner', meaning: 'AFR ash, TSR, SHC' }],
 }
 
+/*
+ * Calciner temperatures. Named as DCS tags, but live (2026-11-01) they carry one value every 1–2 h on
+ * the hour, arrive as text like the laboratory, and stopped on 16 Oct with the laboratory feeds: they
+ * come through the quality-table parser, so they are read and charted as laboratory samples.
+ */
 const CALCINER_DCS: DeviceSpec = {
   devID: JSWCALN,
-  kind: 'process',
-  label: 'Calciner DCS',
-  groups: [{ id: 'calciner', label: 'Calciner' }],
+  kind: 'lab',
+  label: 'Calciner temperatures',
+  groups: [{ id: 'calciner_avg', label: 'Calcination — Combined' }],
   sensors: [
-    { id: 'D0', name: 'Calciner 1 temperature', unit: '°C', group: 'calciner', meaning: 'target < 980 °C; quality table: cyclone 1 tag in ABB still to be confirmed' },
-    { id: 'D1', name: 'Calciner 2 temperature', unit: '°C', group: 'calciner', meaning: 'target < 980 °C; quality table: cyclone 1 tag in ABB still to be confirmed' },
+    { id: 'D0', name: 'Calciner 1 temperature', unit: '°C', group: 'calciner_avg', meaning: 'target < 980 °C; quality table: cyclone 1 tag in ABB still to be confirmed' },
+    { id: 'D1', name: 'Calciner 2 temperature', unit: '°C', group: 'calciner_avg', meaning: 'target < 980 °C; quality table: cyclone 1 tag in ABB still to be confirmed' },
   ],
 }
 
@@ -394,8 +399,6 @@ const KILN_LINE: LineSpec = {
     kiln('D155'),
     kiln('D156'),
     afr('D2'),
-    { devID: JSWCALN, sensorId: 'D0' },
-    { devID: JSWCALN, sensorId: 'D1' },
   ],
   /** The quality parameters charted on Trend Analysis, in this order. */
   labTrends: [
@@ -415,6 +418,8 @@ const KILN_LINE: LineSpec = {
     { devID: FLSCALC, sensorId: 'D16' },
     { devID: FLSCALC, sensorId: 'D15' },
     { devID: FLSCALC, sensorId: 'D17' },
+    { devID: JSWCALN, sensorId: 'D0' },
+    { devID: JSWCALN, sensorId: 'D1' },
     coal('D12'),
     coal('D17'),
   ],

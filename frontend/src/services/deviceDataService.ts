@@ -77,12 +77,25 @@ export async function fetchLatest(
 
 /* ------------------------------ time ranges ------------------------------ */
 
+/** Which keys of a row are readings. */
+export type KeepKey = (sensorId: string) => boolean
+
+/**
+ * The default: sensor ids are D-tags. Everything else a gateway puts in a row — the `RSSI`
+ * heartbeat every device sends each minute, the DCS gateway's `Status` — is metadata, not a reading.
+ */
+export const isSensorId: KeepKey = (key) => /^D\d+$/.test(key)
+
 /**
  * Readings over a window. `GET /api/account/deviceData/getDataByStEt/:devID/:sTime/:eTime`.
  *
  * The route returns one object per distinct timestamp with a key per sensor that
  * reported at that instant; sensors that did not report are simply absent. That shape is
  * preserved — absent stays absent, and is never filled in.
+ *
+ * Only the keys `keep` accepts are read, and a row left with none is dropped. Live, most rows of a
+ * laboratory device are heartbeats ({ time, RSSI: "-1" } every minute, seen for every JSW device on
+ * 2026-11-01): kept, they turned a two-month laboratory range into about a million rows.
  *
  * `sTime`/`eTime` are epoch milliseconds.
  */
@@ -91,6 +104,7 @@ export async function fetchRange(
   startMs: number,
   requestedEndMs: number,
   signal?: AbortSignal,
+  keep: KeepKey = isSensorId,
 ): Promise<TimestampRow[]> {
   // Nothing after the configured cut-off is loaded (config/dataWindow.ts).
   const endMs = clampEnd(requestedEndMs)
@@ -110,12 +124,17 @@ export async function fetchRange(
     if (t == null || afterCutoff(t)) continue
 
     const values: Record<string, number> = {}
+    let any = false
     for (const [key, value] of Object.entries(record)) {
-      if (key === 'time') continue
+      if (key === 'time' || !keep(key)) continue
       const n = asReading(value)
-      if (n != null) values[key] = n
+      if (n != null) {
+        values[key] = n
+        any = true
+      }
     }
-    rows.push({ t, values })
+    // A heartbeat or metadata-only row carries no reading.
+    if (any) rows.push({ t, values })
   }
 
   // The route returns newest-first; downstream code assumes chronological order.
@@ -147,25 +166,26 @@ export async function fetchChunkResilient(
   startMs: number,
   endMs: number,
   signal?: AbortSignal,
+  keep: KeepKey = isSensorId,
   depth = 0,
 ): Promise<TimestampRow[]> {
   try {
-    return await fetchRange(devID, startMs, endMs, signal)
+    return await fetchRange(devID, startMs, endMs, signal, keep)
   } catch (err) {
     if (signal?.aborted || !(err instanceof ApiError) || !err.transient) throw err
     const span = endMs - startMs
     if (span > MIN_CHUNK_MS) {
       const mid = startMs + Math.floor(span / 2)
       const [a, b] = await Promise.all([
-        fetchChunkResilient(devID, startMs, mid, signal, depth + 1),
-        fetchChunkResilient(devID, mid, endMs, signal, depth + 1),
+        fetchChunkResilient(devID, startMs, mid, signal, keep, depth + 1),
+        fetchChunkResilient(devID, mid, endMs, signal, keep, depth + 1),
       ])
       return thinRows([...a, ...b], 1)
     }
     if (depth >= 0 && !(err as ApiError & { retried?: boolean }).retried) {
       await sleep(400, signal)
       try {
-        return await fetchRange(devID, startMs, endMs, signal)
+        return await fetchRange(devID, startMs, endMs, signal, keep)
       } catch (again) {
         if (again instanceof ApiError) (again as ApiError & { retried?: boolean }).retried = true
         throw again
@@ -205,6 +225,8 @@ export async function fetchRangeChunked(
     maxSpanMs?: number
     thinMs?: number
     signal?: AbortSignal
+    /** Which keys are readings; default: D-tags only. */
+    keep?: KeepKey
   } = {},
 ): Promise<ChunkedRange> {
   const {
@@ -213,6 +235,7 @@ export async function fetchRangeChunked(
     maxSpanMs = 7 * DAY_MS,
     thinMs = 0,
     signal,
+    keep = isSensorId,
   } = opts
   // The cut-off first, so a long range ending after it keeps the newest days that have data
   // rather than the days past it.
@@ -231,7 +254,7 @@ export async function fetchRangeChunked(
   async function worker() {
     while (next < chunks.length) {
       const i = next++
-      results[i] = await fetchChunkResilient(devID, chunks[i][0], chunks[i][1], signal)
+      results[i] = await fetchChunkResilient(devID, chunks[i][0], chunks[i][1], signal, keep)
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, chunks.length) }, worker))

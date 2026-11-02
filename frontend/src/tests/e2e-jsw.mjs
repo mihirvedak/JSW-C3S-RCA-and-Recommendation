@@ -40,8 +40,8 @@ const wave = (t, base, amp, periodH) => base + amp * Math.sin((t / HOUR / period
 /** The kiln feed laboratory's last sample: 15 days before the newest C3S. */
 const KILN_FEED_STOP = END - 15 * 24 * HOUR
 
-/** Every device of the JSW line, by id, as a function of the window asked for. */
-const DEVICES = {
+/** Every device of the JSW line, by id: the samples it carries, as a function of the window asked for. */
+const RAW = {
   // Clinker XRD/XRF: a sample about every 2 h. D18 lab C3S, D24 free lime, D19 SO3.
   FLSCLINKER: (s, e) => rows(s, e, 2 * HOUR, (t) => ({ D18: +wave(t, 61, 2, 36).toFixed(2), D24: +wave(t, 1.4, 0.5, 20).toFixed(2), D19: 0.9, D6: 21.8, D8: 5.4, D11: 3.9, D15: 65.1, D5: 93.5, D13: 2.25, D10: 1.4, D16: 18.2, D14: 7.6, D21: 11.9 })),
   // Kiln feed XRF: every 2 h, offset, and — as reported for Nandyal — nothing after 15 days before the
@@ -54,7 +54,8 @@ const DEVICES = {
   FLSCALCINATION1: (s, e) => rows(s, e - 25 * MIN, 2 * HOUR, () => ({ D5: 1.6, D8: 0.3, D9: 1.1, D11: 0.4, D16: 92.1 })),
   FLSCALCINATION2: (s, e) => rows(s, e - 25 * MIN, 2 * HOUR, () => ({ D5: 1.8, D8: 0.3, D9: 1.2, D11: 0.5, D16: 91.4 })),
   FLSCALCINATION: (s, e) => rows(s, e - 25 * MIN, 2 * HOUR, () => ({ D15: 1.7, D16: 91.75, D17: 905 })),
-  JSWCALN_A1: (s, e) => rows(s, e, MIN, (t) => ({ D0: +wave(t, 900, 15, 3).toFixed(0), D1: +wave(t, 910, 15, 4).toFixed(0) })),
+  // Calciner temperatures: on the hour every 2 h, with the laboratory feed (as live).
+  JSWCALN_A1: (s, e) => rows(s, Math.floor(e / (2 * HOUR)) * 2 * HOUR, 2 * HOUR, (t) => ({ D0: +wave(t, 900, 15, 30).toFixed(0), D1: +wave(t, 910, 15, 40).toFixed(0) })),
   // Fuel lab: daily.
   JSWCOAL_A1: (s, e) => rows(s, e, 24 * HOUR, () => ({ D12: 31.2, D17: 33.8, D22: 3150 })),
   // Bomb calorimeters: daily. Both D18 — neither is the clinker C3S.
@@ -67,6 +68,33 @@ const DEVICES = {
   ABBBHPH_A1: (s, e) => rows(s, e, MIN, (t) => ({ D63: +wave(t, 410, 12, 8).toFixed(1), D1: 0.5 })),
   ABBKLNAFRSGC_A1: (s, e) => rows(s, e, MIN, (t) => ({ D2: +wave(t, 6.5, 1, 7).toFixed(2) })),
 }
+
+/*
+ * What the platform actually answers, as seen live for Nandyal (2026-11-01):
+ *   - every value is a string ("38.00825999999995"), except on the model device JSW_C3S;
+ *   - every non-DCS device also sends an RSSI heartbeat row every minute ({ time, RSSI: "-1" }),
+ *     whether or not the laboratory sent anything — most of each answer is heartbeats;
+ *   - DCS rows carry gateway fields beside the tags ("Status": "2", "RSSI": "22").
+ */
+const NUMERIC = new Set(['JSW_C3S'])
+const GATEWAY = new Set(['ABBKLN_A1', 'ABBBHPH_A1', 'ABBKLNAFRSGC_A1'])
+const asText = (v) => (typeof v === 'number' ? String(v) : v)
+function live(devID) {
+  const gen = RAW[devID]
+  const strings = !NUMERIC.has(devID)
+  return (s, e) => {
+    const data = gen(s, e).map(({ time, ...v }) => ({
+      time,
+      ...(strings ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, asText(x)])) : v),
+      ...(GATEWAY.has(devID) ? { Status: '2', RSSI: '22' } : {}),
+    }))
+    if (GATEWAY.has(devID)) return data
+    const beats = []
+    for (let t = Math.floor(e / MIN) * MIN + 23_112; t >= s; t -= MIN) if (t <= e) beats.push({ time: iso(t), RSSI: strings ? '-1' : -1 })
+    return [...data, ...beats].sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0))
+  }
+}
+const DEVICES = Object.fromEntries(Object.keys(RAW).map((d) => [d, live(d)]))
 
 /* ------------------------------ synthetic insight results ------------------------------ */
 
@@ -139,10 +167,19 @@ async function apiHandler(route) {
     requested.push({ kind: 'lastDP', devID, sensors })
     // The ball mill laboratory is not in the simulated account: the platform refuses it.
     if (devID === REFUSED) return refuse()
-    const dev = DEVICES[devID]
-    if (!dev) return json({ devID, data: Object.fromEntries(sensors.map((s) => [s, []])) })
-    const newest = dev(END - 30 * 24 * HOUR, END)[0]
-    return json({ devID, data: Object.fromEntries(sensors.map((s) => [s, newest?.[s] == null ? [] : { time: newest.time, value: newest[s] }])) })
+    const gen = RAW[devID]
+    if (!gen) return json({ devID, data: Object.fromEntries(sensors.map((s) => [s, []])) })
+    const recent = gen(END - 30 * 24 * HOUR, END)
+    const cast = NUMERIC.has(devID) ? (v) => v : asText
+    return json({
+      devID,
+      data: Object.fromEntries(
+        sensors.map((s) => {
+          const row = recent.find((r) => r[s] != null)
+          return [s, row ? { time: row.time, value: cast(row[s]) } : []]
+        }),
+      ),
+    })
   }
   const m = /\/deviceData\/getDataByStEt\/([^/]+)\/(\d+)\/(\d+)/.exec(path)
   if (m) {
@@ -150,7 +187,7 @@ async function apiHandler(route) {
     requested.push({ kind: 'range', devID, start: Number(s), end: Number(e) })
     if (devID === REFUSED) return refuse()
     const dev = DEVICES[devID]
-    return json(dev ? dev(Math.max(Number(s), END - 30 * 24 * HOUR), Math.min(Number(e), END)) : [])
+    return json(dev ? dev(Math.max(Number(s), END - 60 * 24 * HOUR), Math.min(Number(e), END)) : [])
   }
   if (path.includes('/bruce/insightResult/fetch/paginated/')) {
     const insight = decodeURIComponent(path.split('/').pop())
@@ -345,7 +382,7 @@ await step('process monitoring lists the named DCS tags by section and the unnam
   const names = groups.map((g) => g.replace(/\d+$/, '').trim().toLowerCase())
   for (const want of ['kiln', 'calciner', 'preheater', 'unnamed signals']) if (!names.includes(want)) throw new Error(`process sections: ${names.join(' | ')}`)
   const items = await page.locator('.process__item').evaluateAll((els) => els.map((e) => e.getAttribute('title')))
-  for (const want of ['ABBKLN_A1:D154', 'ABBBHPH_A1:D63', 'ABBKLNAFRSGC_A1:D2', 'JSWCALN_A1:D0', 'ABBKLN_A1:D7']) if (!items.includes(want)) throw new Error(`process items: ${items.join(' ')}`)
+  for (const want of ['ABBKLN_A1:D154', 'ABBBHPH_A1:D63', 'ABBKLNAFRSGC_A1:D2', 'ABBKLN_A1:D7']) if (!items.includes(want)) throw new Error(`process items: ${items.join(' ')}`)
   // ABBKLN_A1:D7 (unnamed, 812) is not the predicted C3S JSW_C3S:D7.
   await page.locator('.process__item[title="ABBKLN_A1:D7"]').click()
   const detail = await page.locator('.process__detail').innerText()
@@ -358,13 +395,13 @@ await step('Trend Analysis shows only the kiln trends JSW has tags for, and says
   await page.locator('.etrend__grid, .state--empty').first().waitFor({ timeout: 15_000 })
   const process = page.locator('.panel', { hasText: 'Process Trends' })
   const cards = await process.locator('.etrend__card h4').allInnerTexts()
-  if (cards.join('|') !== 'Kiln feed|Kiln coal|PC coal|Low-NOx coal|Solid AFR|Calciner 1 temperature|Calciner 2 temperature') throw new Error(`process cards: ${cards.join(' | ')}`)
+  if (cards.join('|') !== 'Kiln feed|Kiln coal|PC coal|Low-NOx coal|Solid AFR') throw new Error(`process cards: ${cards.join(' | ')}`)
   if ((await page.locator('.etrend__card[data-trend="kiln-fill"]').count()) !== 0) throw new Error('no filling degree without a kiln speed tag')
   // Every process card with data in the range draws a chart.
-  if ((await process.locator('.etrend__card .highcharts-container').count()) !== 7) throw new Error('every process card should draw its chart')
+  if ((await process.locator('.etrend__card .highcharts-container').count()) !== 5) throw new Error('every process card should draw its chart')
   const lab = page.locator('.panel', { hasText: 'Laboratory Trends' })
   const labCards = await lab.locator('.ltrend__card h4').allInnerTexts()
-  for (const want of ['Clinker C3S (XRD)', 'Predicted C3S (Bogue + Ridge)', 'Clinker free lime', 'Kiln feed LSF', 'Average calcination']) if (!labCards.includes(want)) throw new Error(`lab trend cards: ${labCards.join(' | ')}`)
+  for (const want of ['Clinker C3S (XRD)', 'Predicted C3S (Bogue + Ridge)', 'Clinker free lime', 'Kiln feed LSF', 'Average calcination', 'Calciner 1 temperature']) if (!labCards.includes(want)) throw new Error(`lab trend cards: ${labCards.join(' | ')}`)
   if ((await lab.locator('.ltrend__card[data-trend="FLSCLINKER:D18"] .highcharts-container').count()) !== 1) throw new Error('lab C3S should be charted')
   // The kiln feed laboratory stopped 15 days ago: its card says so instead of drawing nothing silently.
   const lsf = await lab.locator('.ltrend__card[data-trend="FLSKILNFEED:D6"]').innerText()
@@ -389,6 +426,78 @@ await step('opening an event adds the RCA-named JSW tags, labelled with the insi
   if (samples.includes('Kiln coal ash')) throw new Error('an ash tag is listed although the event never mentions ash')
 })
 await page.screenshot({ path: `${SHOTS}/jsw-03-trends.png`, fullPage: true })
+
+/** "2026-08-18T08:00" -> the picker's "MM/DD/YYYY" and "HH:mm" fields. */
+const toFields = (iso) => {
+  const [d, t] = iso.split('T')
+  const [y, m, day] = d.split('-')
+  return { date: `${m}/${day}/${y}`, time: t }
+}
+async function setRange(from, to) {
+  if (!(await page.locator('.trp__pop').count())) await page.locator('.trp__trigger').click()
+  await page.locator('.trp__pop').waitFor()
+  const a = toFields(from)
+  const b = toFields(to)
+  await page.getByLabel('Start date', { exact: true }).fill(a.date)
+  await page.getByLabel('Start time', { exact: true }).fill(a.time)
+  await page.getByLabel('End date', { exact: true }).fill(b.date)
+  await page.getByLabel('End time', { exact: true }).fill(b.time)
+  await page.getByRole('button', { name: 'Apply' }).click()
+}
+
+await step('a six-week range draws the laboratory C3S on C3S Analysis, with heartbeats on every device, within 15 s', async () => {
+  await openTab('C3S Analysis')
+  const t0 = Date.now()
+  await setRange('2026-09-18T11:30', '2026-10-30T11:30')
+  await page
+    .waitForFunction(
+      () => {
+        const stat = [...document.querySelectorAll('.stat')].find((e) => e.textContent?.includes('Clinker C3S (XRD)'))
+        return stat != null && /\d+\.\d{2}/.test(stat.querySelector('.stat__value')?.textContent ?? '')
+      },
+      null,
+      { timeout: 30_000 },
+    )
+    .catch(() => {
+      throw new Error('the laboratory C3S KPI never showed a value for the six-week range')
+    })
+  const secs = (Date.now() - t0) / 1000
+  const points = await page.locator('.analysis .timeline .highcharts-series-1 .highcharts-point').count()
+  if (points < 400) throw new Error(`the trend should draw every lab C3S sample of six weeks (about 500), drew ${points}`)
+  if (secs > 15) throw new Error(`the laboratory C3S took ${secs.toFixed(1)} s to appear`)
+  console.log(`    (lab C3S on screen after ${secs.toFixed(1)} s, ${points} samples)`)
+  // Gateway fields and heartbeats are not sensors.
+  const items = await page.locator('.process__item').evaluateAll((els) => els.map((e) => e.getAttribute('title')))
+  if (items.some((k) => /:(RSSI|Status)$/.test(k ?? ''))) throw new Error(`gateway fields listed as signals: ${items.filter((k) => /RSSI|Status/.test(k ?? '')).join(' ')}`)
+  const src = await page.locator('.sources__summary').innerText()
+  if (!/stopped before the range|devices with data in range/.test(src)) throw new Error(`data sources summary: ${src}`)
+  await page.screenshot({ path: `${SHOTS}/jsw-04-six-weeks.png`, fullPage: true })
+})
+
+await step('an RCA event outside the range still shows its laboratory C3S in the RCA panel', async () => {
+  // 30 Oct 10:00–11:30 plant time: both RCA events are earlier, and the only lab C3S in the range
+  // (06:00 UTC) is more than 4 h after either. The 48-hour timeline still offers the events.
+  await setRange('2026-10-30T10:00', '2026-10-30T11:30')
+  await page.waitForTimeout(1500)
+  await openTab('C3S Analysis')
+  await page.locator('button.rtl__seg').first().waitFor({ timeout: 15_000 })
+  await page.locator('button.rtl__seg').first().click()
+  const rca = page.locator('.panel', { hasText: 'Root Cause Analysis' })
+  if (!(await rca.locator('.event-nav__pos').innerText()).includes('outside range')) throw new Error('the picked event should be outside the range')
+  await page
+    .waitForFunction(
+      () => {
+        const cell = [...document.querySelectorAll('.rca__meta div')].find((e) => e.textContent?.includes('Actual C3S (lab)'))
+        return cell != null && /\d+\.\d{2}%/.test(cell.textContent ?? '')
+      },
+      null,
+      { timeout: 15_000 },
+    )
+    .catch(async () => {
+      const txt = await rca.locator('.rca__meta').innerText()
+      throw new Error(`actual C3S for an event outside the range should come from its own laboratory look-back: ${txt.replace(/\s+/g, ' ')}`)
+    })
+})
 
 await step('switching to Adani rescopes every load to its devices and insight', async () => {
   requested.length = 0

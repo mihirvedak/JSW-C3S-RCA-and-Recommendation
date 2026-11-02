@@ -15,7 +15,8 @@ import type { LineModel } from '../config/lineModel'
 import { sensorKey } from '../config/lineModel'
 import { thinRows } from '../lib/series'
 import type { TimestampRow } from '../lib/series'
-import { fetchLatest, fetchRange, fetchRangeChunked } from './deviceDataService'
+import { fetchLatest, fetchRange, fetchRangeChunked, isSensorId } from './deviceDataService'
+import type { KeepKey } from './deviceDataService'
 import type { ChunkedRange, LastReading } from './deviceDataService'
 
 /** One device's bare-keyed rows as line rows, dropping the readings the line rejects. */
@@ -75,6 +76,18 @@ class AllDevicesFailed extends Error {
   }
 }
 
+/**
+ * Which keys of a device's rows are read. A laboratory-type device: only the sensors the client
+ * listed (its rows are otherwise a heartbeat a minute, and any unlisted tag would not be shown
+ * anyway). A process device: every D-tag, so unnamed signals can still be discovered.
+ */
+function keepFor(line: LineModel, devID: string): KeepKey {
+  const d = line.devices.find((x) => x.devID === devID)
+  if (!d || d.kind === 'process') return isSensorId
+  const listed = new Set([...d.sensors.map((s) => s.id), ...(d.unnamed ?? []).map((u) => u.id)])
+  return (key) => listed.has(key)
+}
+
 /** Run `fn` over the devices a few at a time: a line with eleven laboratory devices must not open 44 requests at once. */
 async function perDevice<T>(
   devIDs: readonly string[],
@@ -128,7 +141,7 @@ export async function fetchDevicesRangeDetailed(
   endMs: number,
   signal?: AbortSignal,
 ): Promise<DevicesRange> {
-  const results = await perDevice(devIDs, (d) => fetchRange(d, startMs, endMs, signal), signal)
+  const results = await perDevice(devIDs, (d) => fetchRange(d, startMs, endMs, signal, keepFor(line, d)), signal)
   const outcomes = results.map((r) => outcome(r.devID, r.value ?? null, r.error ?? null))
   if (devIDs.length && results.every((r) => r.error != null)) throw new AllDevicesFailed(outcomes)
   const parts = results.flatMap((r) => (r.value ? [qualifyRows(line, r.devID, r.value)] : []))
@@ -143,7 +156,7 @@ export async function fetchDevicesRangeChunked(
   endMs: number,
   opts: Parameters<typeof fetchRangeChunked>[3] = {},
 ): Promise<DevicesChunkedRange> {
-  const results = await perDevice(devIDs, (d) => fetchRangeChunked(d, startMs, endMs, opts), opts.signal)
+  const results = await perDevice(devIDs, (d) => fetchRangeChunked(d, startMs, endMs, { ...opts, keep: keepFor(line, d) }), opts.signal)
   const outcomes = results.map((r) => outcome(r.devID, r.value?.rows ?? null, r.error ?? null))
   if (devIDs.length && results.every((r) => r.error != null)) throw new AllDevicesFailed(outcomes)
   const ok = results.flatMap((r) => (r.value ? [{ devID: r.devID, part: r.value }] : []))

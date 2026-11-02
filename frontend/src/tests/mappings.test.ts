@@ -240,7 +240,7 @@ describe('display labels', () => {
 })
 
 describe('JSW Cement: the line from the tag list', () => {
-  it('has fifteen devices, eleven read as laboratory and four as process', () => {
+  it('has fifteen devices, twelve read as laboratory and three as process', () => {
     expect(JSW.labDevices).toEqual([
       'FLSRAWMILL01',
       'FLSBALLMILL',
@@ -253,8 +253,10 @@ describe('JSW Cement: the line from the tag list', () => {
       'JSWBMBCLRMTR_KC',
       'JSWBMBCLRMTR_PC',
       'JSW_C3S',
+      'JSWCALN_A1',
     ])
-    expect(JSW.processDevices).toEqual(['ABBKLN_A1', 'ABBBHPH_A1', 'ABBKLNAFRSGC_A1', 'JSWCALN_A1'])
+    // The calciner temperatures arrive every 1–2 h with the laboratory feeds: read as laboratory samples.
+    expect(JSW.processDevices).toEqual(['ABBKLN_A1', 'ABBBHPH_A1', 'ABBKLNAFRSGC_A1'])
     expect(JSW.insightId).toBe('INS_c3snandyalrca')
   })
 
