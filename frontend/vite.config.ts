@@ -68,7 +68,10 @@ export default defineConfig(({ mode }) => {
           let bytes = 0
           const head: Buffer[] = []
           const whole: Buffer[] = []
-          const dump = dumpDir !== '' && /insightResult/.test(req.url ?? '')
+          // Insight answers, and device answers except the dense DCS devices (ABB…, ~10 MB a day each).
+          const dump =
+            dumpDir !== '' &&
+            (/insightResult/.test(req.url ?? '') || (/deviceData\/(lastDP|getDataByStEt)/.test(req.url ?? '') && !/getDataByStEt\/ABB/.test(req.url ?? '')))
           let kept = 0
           proxyRes.on('data', (c: Buffer) => {
             bytes += c.length
@@ -84,8 +87,11 @@ export default defineConfig(({ mode }) => {
             console.log(`[proxy] ${req.method} ${req.url} -> ${proxyRes.statusCode} ${bytes} B ${secs} s ${enc}`)
             if (dump) {
               try {
-                const file = join(dumpDir, `insight-${Date.now()}.json`)
+                const kind = /insightResult/.test(req.url ?? '') ? 'insight' : 'device'
+                const file = join(dumpDir, `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.json`)
                 writeFileSync(file, inflateAll(Buffer.concat(whole), enc))
+                // Each answer with its request, so a session can be replayed: url, method, request body.
+                writeFileSync(`${file}.req`, JSON.stringify({ url: req.url, method: req.method, body: (req as { body?: unknown }).body ?? null }))
                 console.log(`[proxy-dump] ${req.url} -> ${file}`)
               } catch (err) {
                 console.log(`[proxy-dump] failed: ${err instanceof Error ? err.message : String(err)}`)

@@ -135,6 +135,12 @@ Differences from Adani's `INS_df1b3c1a11de`, and what the app does:
 The model output `JSW_C3S:D7` has been **exactly 42.256 every 15 minutes since 17 Oct**: its laboratory
 inputs stopped on 16 Oct and it repeats its last result. Predictions after 16 Oct are not real.
 
+**"Predicted line not showing" on C3S Analysis (2 Nov):** replaying the plant's own captured session
+showed the line was drawn but pinned to the top border of the plot — the y-axis was fitted to the data
+alone, so the flat 42.256 became its maximum, and the target band (41.97–46.04) and target (44) were
+mostly off the chart. The C3S trend now always keeps the insight's band and target in view
+(`softMin` / `softMax`) with 8 % padding, so a flat prediction sits inside the plot against the band.
+
 ## Data sources panel and per-device failures (2026-11-01)
 
 A line now loads each device on its own (three at a time, `services/lineDataService.ts`): a device

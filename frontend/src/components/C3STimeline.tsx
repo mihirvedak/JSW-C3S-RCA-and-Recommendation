@@ -194,6 +194,13 @@ export function C3STimeline({
         labels: { style: { color: COLOR.text, fontSize: '10px' }, format: '{value:.1f}' },
         startOnTick: false,
         endOnTick: false,
+        // The target band and target are always in view, and no series sits on the plot's edge. Fitted
+        // to the data alone, a flat prediction (JSW_C3S:D7 has repeated 42.256 since 17 Oct 2026) became
+        // the axis maximum and was drawn on the top border, where it could not be seen.
+        softMin: band ? Math.min(band.low, target ?? band.low) : (target ?? undefined),
+        softMax: band ? Math.max(band.high, target ?? band.high) : (target ?? undefined),
+        minPadding: 0.08,
+        maxPadding: 0.08,
         plotBands: band
           ? [{ from: band.low, to: band.high, color: COLOR.band, zIndex: 0 }]
           : [],

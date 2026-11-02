@@ -357,6 +357,13 @@ await step('a C3S above 80 % or below 0 % is not drawn: the trend\u2019s axis st
   await openTab('C3S Analysis')
 })
 
+await step('the C3S trend keeps the insight\u2019s target band in view, so a flat prediction is never on the plot edge', async () => {
+  // Band 59–63 (simulated insight). Fitted to the data alone (58.3–62.7) the axis stopped short of 63, and
+  // live, where the prediction has been flat since 17 Oct, the line sat on the top border of the plot.
+  const ticks = (await page.locator('.analysis .timeline .highcharts-yaxis-labels text').allTextContents()).map(Number).filter(Number.isFinite)
+  if (Math.max(...ticks) < 63 || Math.min(...ticks) > 59) throw new Error(`the axis should cover the target band 59–63: ${ticks.join(', ')}`)
+})
+
 await step('lab quality groups the six laboratory devices by material, keeps the three D18s apart, hides the old physics C3S', async () => {
   const tabs = await page.locator('.lab__tab-name').allInnerTexts()
   for (const want of ['Raw Mill (Raw Meal) Quality', 'Ball Mill (Raw Meal) Quality', 'Kiln Feed Quality', 'Clinker Quality', 'Calciner 1 Hot Meal Quality', 'Calciner 2 Hot Meal Quality', 'Calcination — Combined', 'Fuel Quality', 'Model Outputs']) if (!tabs.includes(want)) throw new Error(`lab groups: ${tabs.join(' | ')}`)
