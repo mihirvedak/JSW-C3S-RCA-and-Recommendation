@@ -98,9 +98,9 @@ Consequences in the app:
   timeline or an older range).
 - Readings sent as numeric strings are read as numbers (`asReading` in `services/deviceDataService.ts`);
   before 1 Nov they were discarded, so the laboratory devices looked empty even for ranges that held data.
-- A banner names every laboratory device whose newest reading is more than a day before the window's
-  end, with its last date and what it carries (laboratory C3S, free lime), so an empty actual C3S is
-  explained where it is seen.
+- Stopped laboratory devices are reported in the Data sources panel ("Stopped before range", with the
+  newest reading on the platform). A page banner listing them was added on 1 Nov and removed on 2 Nov
+  at the plant's request.
 - Every API call is sent with `cache: 'no-store'` (`services/apiClient.ts`): no conditional requests,
   no cached device data.
 - A chunk the platform answers with a gateway error, no response, or a 2xx with an empty body is

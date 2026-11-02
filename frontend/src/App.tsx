@@ -31,7 +31,7 @@ import { useEventContext } from './hooks/useEventContext'
 import { PROCESS_MAX_SPAN_MS } from './hooks/useDashboardData'
 import { contextWindow } from './lib/eventTrends'
 import { applyDataEnd, clampEnd } from './config/dataWindow'
-import { DAY_MS, MINUTE_MS, formatAge } from './lib/time'
+import { MINUTE_MS } from './lib/time'
 import { useNow } from './hooks/useNow'
 import { loadLineSelection, resolveLine, saveLineSelection } from './config/plants'
 import type { LineSelection } from './config/plants'
@@ -157,24 +157,6 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
 
   const isStale = d.anchorMs != null && now - d.anchorMs > d.staleAfterMs
 
-  // Laboratory devices whose newest reading on the platform is more than a day before the end of the
-  // window: their parameters cannot appear in it. Named here, with their last date, so an empty
-  // "actual C3S" is explained where it is seen (seen live on JSW: the clinker laboratory stopped
-  // 16 Oct 2026 while the model and the DCS went on).
-  const labBehind = useMemo(() => {
-    const end = d.windowEnd
-    if (end == null) return []
-    return d.sources
-      .filter((s) => s.kind === 'lab' && s.newestEver != null && end - s.newestEver > DAY_MS)
-      .map((s) => {
-        const carries = (['actualC3S', 'freeLime', 'predictedC3S'] as const)
-          .filter((r) => line.role(r)?.startsWith(`${s.devID}:`))
-          .map((r) => (r === 'actualC3S' ? 'laboratory C3S' : r === 'freeLime' ? 'free lime' : 'predicted C3S'))
-        return { ...s, carries }
-      })
-      .sort((a, b) => (b.carries.length - a.carries.length) || (a.newestEver! - b.newestEver!))
-  }, [d.sources, d.windowEnd, line])
-
   const header = (loading: boolean) => (
     <Header
       anchorMs={d.anchorMs}
@@ -231,41 +213,6 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             <strong>Feed is behind.</strong> The newest laboratory sample is{' '}
             {formatFull(d.anchorMs)}. The range below is anchored to that sample rather than
             to the current time, so the charts show real data instead of an empty range.
-          </div>
-        ) : null}
-
-        {labBehind.length > 0 ? (
-          <div className="notice notice--warn" role="status" data-testid="lab-behind">
-            <strong>
-              {labBehind.length === 1 ? 'A laboratory feed is behind.' : `${labBehind.length} laboratory feeds are behind.`}
-            </strong>{' '}
-            {labBehind.slice(0, 3).map((s, i) => (
-              <span key={s.devID}>
-                {i > 0 ? ' · ' : ''}
-                <code>{s.devID}</code> ({s.label}
-                {s.carries.length ? `; carries the ${s.carries.join(' and ')}` : ''}) last reported{' '}
-                <strong>{formatFull(s.newestEver)}</strong> ({formatAge(s.newestEver, now)})
-              </span>
-            ))}
-            {labBehind.length > 3 ? (
-              <span title={labBehind.slice(3).map((s) => `${s.devID}: ${formatFull(s.newestEver)}`).join('\n')}>
-                {' '}· and {labBehind.length - 3} more (see Data sources)
-              </span>
-            ) : null}
-            . Their parameters cannot appear in a range that ends after that.{' '}
-            <button
-              type="button"
-              className="btn btn--sm notice__action"
-              onClick={() => {
-                // The 7 days up to the newest laboratory reading, as a custom range: every laboratory
-                // parameter that was being sent then appears, and the stop is on the right edge.
-                const end = labBehind[0].newestEver! + MINUTE_MS
-                setSelection({ kind: 'custom', start: end - 7 * DAY_MS, end, label: `Week up to the last ${labBehind[0].label.toLowerCase()} sample` })
-              }}
-            >
-              Show the week up to {formatFull(labBehind[0].newestEver)}
-            </button>{' '}
-            Raise the stopped feed with the plant&rsquo;s laboratory integration.
           </div>
         ) : null}
 
